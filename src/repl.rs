@@ -19,7 +19,7 @@ fn print_haki_splash() {
  / __  / /_/ / ,< / /  
 /_/ /_/\__,_/_/|_/_/   
 
-v1.0.0 - Developed by Gabriel Pacheco 
+v1.1.0 - Developed by Gabriel Pacheco 
 "#;
     println!("{}", splash.bold().cyan());
 }
