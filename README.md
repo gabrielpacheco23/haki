@@ -21,9 +21,10 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 Clone the repository and install it globally using Cargo:
 
 ```bash
-git clone [https://github.com/gabrielpacheco23/haki.git](https://github.com/gabrielpacheco23/haki.git)
+git clone https://github.com/gabrielpacheco23/haki.git
 cd haki
 cargo install --path .
+
 ```
 
 ### Running Haki
@@ -31,12 +32,14 @@ Launch the interactive REPL:
 
 ```bash
 haki
+
 ```
 
 Or run a script:
 
 ```bash
 haki script.hk
+
 ```
 
 ## 📖 Language Tour
@@ -60,6 +63,7 @@ Forget endless `(make-hash)` and `(vector-set!)`. Haki supports native brackets 
   })
 
 (displayln (hash-ref player "name")) ;; Output: Zoro
+
 ```
 
 ### 2. Pattern Matching
@@ -72,6 +76,7 @@ Clean up your logic with the built-in `match` macro.
   (("attack" target) (displayln (string-append "Attacking " target)))
   (("equip" item)    (displayln (string-append "Equipped " item)))
   (_                 (displayln "Unknown action")))
+
 ```
 
 ### 3. The Pipe Operator
@@ -87,6 +92,7 @@ Read your functional data transformations from top to bottom, not inside out.
       (fold + 0)))
 
 (displayln sum-of-evens) ;; Output: 120
+
 ```
 
 ### 4. JSON & Web Requests
@@ -99,6 +105,7 @@ Haki is ready for the web. Use the native shell bridge and JSON parser to intera
 
 (display "Product Name: ")
 (displayln (hash-ref product "title"))
+
 ```
 
 ## 🧠 Architecture
