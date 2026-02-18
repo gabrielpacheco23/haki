@@ -9,8 +9,22 @@ use std::borrow::Cow;
 
 use crate::{ExecMode, env::Env, expr::LispExp, run_source};
 
+#[allow(unused)]
+fn print_haki_splash() {
+    let splash = r#"
+    __  __      __   _
+   / / / /___ _/ /__(_)
+  / /_/ / __ `/ //_/ / 
+ / __  / /_/ / ,< / /  
+/_/ /_/\__,_/_/|_/_/   
+
+v1.0.0 - Developed by Gabriel Pacheco 
+"#;
+    println!("{}", splash.bold().cyan());
+}
+
 pub fn repl(mut env: Env) {
-    println!("{}", "Welcome to the Haki REPL!".bold().cyan());
+    print_haki_splash();
     println!("{}", "Press Ctrl+D or type 'quit' to exit.\n".dimmed());
 
     let mut rl = Editor::new().expect("Error starting terminal");
