@@ -3,11 +3,12 @@ use crate::{
     env::{Env, LispEnv},
     expand_quasiquote,
     expr::{LispExp, LispLambda},
+    heap::Heap,
     helpers::{env_set, expand_macros, pairs_to_vec},
 };
 use std::rc::Rc;
 
-pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
+pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     match exp {
         LispExp::Symbol(s) => {
             LispEnv::get(env, &s).ok_or_else(|| format!("Variable not found: '{}'", s))
@@ -27,17 +28,17 @@ pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
                         );
                     }
 
-                    let test_result = eval(tail[0].clone(), env)?;
+                    let test_result = eval(tail[0].clone(), env, heap)?;
                     match test_result {
-                        LispExp::Bool(false) => eval(tail[2].clone(), env),
-                        _ => eval(tail[1].clone(), env),
+                        LispExp::Bool(false) => eval(tail[2].clone(), env, heap),
+                        _ => eval(tail[1].clone(), env, heap),
                     }
                 }
                 LispExp::Symbol(s) if s == "begin" => {
                     let mut last_val = LispExp::List(vec![]);
 
                     for exp in tail {
-                        last_val = eval(exp.clone(), env)?;
+                        last_val = eval(exp.clone(), env, heap)?;
                     }
 
                     Ok(last_val)
@@ -48,7 +49,7 @@ pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
                     }
 
                     let (name, val) = match &tail[0] {
-                        LispExp::Symbol(s) => (s.clone(), eval(tail[1].clone(), env)?),
+                        LispExp::Symbol(s) => (s.clone(), eval(tail[1].clone(), env, heap)?),
                         LispExp::List(def_header) => {
                             if def_header.is_empty() {
                                 return Err("Invalid procedure definition".to_string());
@@ -146,7 +147,7 @@ pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
                         }
                     };
 
-                    let val = eval(tail[1].clone(), env)?;
+                    let val = eval(tail[1].clone(), env, heap)?;
                     env_set(env, var_name, val)?;
 
                     Ok(LispExp::Void)
@@ -164,37 +165,41 @@ pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
                         return Err("'quasiquote' requires 1 argument".to_string());
                     }
 
-                    expand_quasiquote(&tail[0], env)
+                    expand_quasiquote(&tail[0], env, heap)
                 }
                 _ => {
-                    let proc = eval(head.clone(), env)?;
+                    let proc = eval(head.clone(), env, heap)?;
 
                     match proc {
                         LispExp::Macro(macro_def) => {
-                            let expansion = apply_macro(&macro_def, tail, env)?;
-                            eval(expansion, env)
+                            let expansion = apply_macro(&macro_def, tail, env, heap)?;
+                            eval(expansion, env, heap)
                         }
 
                         _ => {
-                            let args: Result<Vec<LispExp>, String> =
-                                tail.iter().map(|arg| eval(arg.clone(), env)).collect();
+                            let args: Result<Vec<LispExp>, String> = tail
+                                .iter()
+                                .map(|arg| eval(arg.clone(), env, heap))
+                                .collect();
 
-                            apply_procedure(&proc, &args?, env)
+                            apply_procedure(&proc, &args?, env, heap)
                         }
                     }
                 }
             }
         }
-        LispExp::VmClosure { .. } => todo!(),
         LispExp::Void => Ok(LispExp::Void),
-        LispExp::Pair(_, _) => {
-            let ast_list = pairs_to_vec(&exp);
-            let expanded_ast = expand_macros(ast_list, env)?;
-
-            eval(expanded_ast, env)
-        }
         LispExp::Nil => Ok(LispExp::List(vec![])),
-        LispExp::Vector(_v) => todo!(),
-        LispExp::HashMap(_map) => todo!(),
+        LispExp::Pair(_, _) => {
+            let ast_list = pairs_to_vec(&exp, heap);
+            let expanded_ast = expand_macros(ast_list, env, heap)?;
+            eval(expanded_ast, env, heap)
+        }
+        val @ LispExp::VmClosure { .. } => Ok(val),
+        LispExp::Vector(v_ref) => Ok(LispExp::Vector(v_ref)),
+        LispExp::HashMap(map_ref) => Ok(LispExp::HashMap(map_ref)),
+        LispExp::VectorData(_) | LispExp::HashMapData(_) => {
+            Err("'eval' found a data variant outside the heap".to_string())
+        }
     }
 }

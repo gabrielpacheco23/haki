@@ -3,7 +3,8 @@ use std::{fmt::Display, rc::Rc};
 use crate::{
     env::{Env, LispEnv},
     evaluate::eval,
-    expr::LispExp,
+    expr::{LispExp, lisp_fmt},
+    heap::Heap,
     helpers::{env_set, get_float},
 };
 
@@ -65,21 +66,21 @@ pub struct CallFrame {
     pub env: Env,
 }
 
-fn pop_float(stack: &mut Vec<LispExp>) -> Result<f64, String> {
+fn pop_float(stack: &mut Vec<LispExp>, heap: &Heap) -> Result<f64, String> {
     let val = stack.pop().ok_or("Empty stack")?;
-    get_float(&val)
+    get_float(&val, heap)
 }
 
 macro_rules! vm_math {
-    ($op:tt, $self:ident) => {{
-          let b = pop_float(&mut $self.stack)?;
-          let a = pop_float(&mut $self.stack)?;
+    ($op:tt, $self:ident, $heap:expr) => {{
+          let b = pop_float(&mut $self.stack, $heap)?;
+          let a = pop_float(&mut $self.stack, $heap)?;
           $self.stack.push(LispExp::Number(a $op b));
       }};
 }
 
 macro_rules! vm_cmp_n {
-    ($op:tt, $arity:expr, $self:expr) => {{
+    ($op:tt, $arity:expr, $self:expr, $heap:expr) => {{
         let mut args = Vec::with_capacity($arity);
         for _ in 0..$arity {
             args.push($self.stack.pop().unwrap_or(LispExp::Void));
@@ -88,8 +89,8 @@ macro_rules! vm_cmp_n {
 
         let mut is_true = true;
         for i in 0..($arity - 1) {
-            let a = get_float(&args[i])?;
-            let b = get_float(&args[i+1])?;
+            let a = get_float(&args[i], $heap)?;
+            let b = get_float(&args[i+1], $heap)?;
             if !(a $op b) {
                 is_true = false;
                 break;
@@ -108,7 +109,12 @@ impl Vm {
         }
     }
 
-    pub fn execute(&mut self, chunk: Rc<Chunk>, env: Env) -> Result<LispExp, String> {
+    pub fn execute(
+        &mut self,
+        chunk: Rc<Chunk>,
+        env: Env,
+        heap: &mut Heap,
+    ) -> Result<LispExp, String> {
         self.frames.push(CallFrame { chunk, ip: 0, env });
 
         loop {
@@ -138,16 +144,16 @@ impl Vm {
                     env_set(&frame.env, &name, val)?;
                     self.stack.push(LispExp::Void);
                 }
-                OpCode::Add => vm_math!(+, self),
-                OpCode::Sub => vm_math!(-, self),
-                OpCode::Mul => vm_math!(*, self),
-                OpCode::Div => vm_math!(/, self),
-                OpCode::Mod => vm_math!(%, self),
-                OpCode::Eq(n) => vm_cmp_n!(==, *n, self),
-                OpCode::Lt(n) => vm_cmp_n!(<, *n, self),
-                OpCode::Le(n) => vm_cmp_n!(<=, *n, self),
-                OpCode::Gt(n) => vm_cmp_n!(>, *n, self),
-                OpCode::Ge(n) => vm_cmp_n!(>=, *n, self),
+                OpCode::Add => vm_math!(+, self, &heap),
+                OpCode::Sub => vm_math!(-, self, &heap),
+                OpCode::Mul => vm_math!(*, self, &heap),
+                OpCode::Div => vm_math!(/, self, &heap),
+                OpCode::Mod => vm_math!(%, self, &heap),
+                OpCode::Eq(n) => vm_cmp_n!(==, *n, self, &heap),
+                OpCode::Lt(n) => vm_cmp_n!(<, *n, self, &heap),
+                OpCode::Le(n) => vm_cmp_n!(<=, *n, self, &heap),
+                OpCode::Gt(n) => vm_cmp_n!(>, *n, self, &heap),
+                OpCode::Ge(n) => vm_cmp_n!(>=, *n, self, &heap),
                 OpCode::JumpIfFalse(address) => {
                     let cond = self.stack.pop().unwrap();
                     let is_false = matches!(cond, LispExp::Bool(false));
@@ -172,7 +178,7 @@ impl Vm {
                         LispExp::Native(f) => {
                             let curr_env = &mut self.frames.last_mut().unwrap().env;
 
-                            let result = f(&args, curr_env)?;
+                            let result = f(&args, curr_env, heap)?;
                             if is_tail {
                                 self.frames.pop();
                                 if self.frames.is_empty() {
@@ -222,7 +228,7 @@ impl Vm {
                                     }
                                 }
 
-                                let result = eval((*lambda.body).clone(), &mut new_env)?;
+                                let result = eval((*lambda.body).clone(), &mut new_env, heap)?;
 
                                 if is_tail {
                                     self.frames.pop();
@@ -236,7 +242,10 @@ impl Vm {
                             }
                         }
                         _ => {
-                            return Err(format!("Object '{}' is not callable", func));
+                            return Err(format!(
+                                "Object '{}' is not callable",
+                                lisp_fmt(&func, &heap)
+                            ));
                         }
                     }
                 }
@@ -263,13 +272,16 @@ impl Vm {
                             vec.insert(0, a);
                             self.stack.push(LispExp::List(vec));
                         }
-                        _ => self.stack.push(LispExp::Pair(Rc::new(a), Rc::new(b))),
+                        _ => self.stack.push(LispExp::Pair(heap.alloc(a), heap.alloc(b))),
                     }
                 }
                 OpCode::Car => {
                     let obj = self.stack.pop().unwrap_or(LispExp::Void);
                     match obj {
-                        LispExp::Pair(car, _) => self.stack.push((*car).clone()),
+                        LispExp::Pair(car, _) => match heap.get(car) {
+                            Some(val) => self.stack.push(val.clone()),
+                            None => return Err("'car' expects a pair or list".to_string()),
+                        },
                         LispExp::List(vec) => {
                             if vec.is_empty() {
                                 return Err("car: empty list".to_string());
@@ -277,14 +289,20 @@ impl Vm {
                             self.stack.push(vec[0].clone());
                         }
                         _ => {
-                            return Err(format!("'car' expects a pair or list, but got: {}", obj));
+                            return Err(format!(
+                                "'car' expects a pair or list, but got: {}",
+                                lisp_fmt(&obj, &heap)
+                            ));
                         }
                     }
                 }
                 OpCode::Cdr => {
                     let obj = self.stack.pop().unwrap_or(LispExp::Void);
                     match obj {
-                        LispExp::Pair(_, cdr) => self.stack.push((*cdr).clone()),
+                        LispExp::Pair(_, cdr) => match heap.get(cdr) {
+                            Some(val) => self.stack.push(val.clone()),
+                            None => return Err("'cdr' expects a pair or list".to_string()),
+                        },
                         LispExp::List(vec) => {
                             if vec.is_empty() {
                                 return Err("cdr: empty list".to_string());
@@ -292,7 +310,10 @@ impl Vm {
                             self.stack.push(LispExp::List(vec[1..].to_vec()));
                         }
                         _ => {
-                            return Err(format!("'cdr' expects a pair or list, but got: {}", obj));
+                            return Err(format!(
+                                "'cdr' expects a pair or list, but got: {}",
+                                lisp_fmt(&obj, &heap)
+                            ));
                         }
                     }
                 }
@@ -333,14 +354,14 @@ impl Display for OpCode {
 }
 
 // Função para exibir o bytecode de forma legível
-pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
+pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
     println!("=== Bytecode: {} ===", name);
 
     for (offset, instruction) in chunk.code.iter().enumerate() {
         print!("{:04}  ", offset);
 
         match instruction {
-            OpCode::PushConst(val) => println!("{:<18} {}", instruction, val),
+            OpCode::PushConst(val) => println!("{:<18} {}", instruction, lisp_fmt(&val, heap)),
             OpCode::GetVar(name) => println!("{:<18} '{}'", instruction, name),
             OpCode::DefVar(name) => println!("{:<18} '{}'", instruction, name),
             OpCode::SetVar(name) => println!("{:<18} '{}'", instruction, name),
@@ -363,7 +384,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
             OpCode::MakeClosure(params, closure_chunk) => {
                 println!("{:<18} {:?}", instruction, params);
                 println!("\n  [Closure Start {:?}]", params);
-                disassemble_chunk(closure_chunk, "Closure Body");
+                disassemble_chunk(closure_chunk, "Closure Body", heap);
                 println!("  [Closure End]\n");
             }
             OpCode::Cons => println!("{}", instruction),

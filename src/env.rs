@@ -1,6 +1,8 @@
+use rand::RngExt;
 use serde_json::Value;
 
 use crate::compiler::compile;
+use crate::heap::{Heap, collect_garbage};
 use crate::helpers::{apply_procedure, expand_macros, get_float, pairs_to_vec, vec_to_pairs};
 use crate::vm::{Chunk, OpCode, Vm};
 use crate::{def_cmp, def_fold, def_is, def_math};
@@ -89,7 +91,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "list?".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if args.len() != 1 {
                     return Err("'list?' requires only 1 argument".to_string());
                 }
@@ -99,7 +101,7 @@ pub fn standard_env() -> Env {
                     match current {
                         LispExp::Nil => break true,
                         LispExp::List(_) => break true,
-                        LispExp::Pair(_, cdr) => current = cdr,
+                        LispExp::Pair(_, cdr) => current = heap.get(*cdr).unwrap_or(&LispExp::Nil),
                         _ => break false,
                     }
                 };
@@ -108,7 +110,7 @@ pub fn standard_env() -> Env {
         );
         env.insert(
             "pair?".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if args.len() != 1 {
                     return Err("'pair?' requires only 1 argument".to_string());
                 }
@@ -148,7 +150,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "procedure?".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if args.len() != 1 {
                     return Err("'procedure?' requires exactly 1 argument".to_string());
                 }
@@ -164,7 +166,7 @@ pub fn standard_env() -> Env {
         // null? verifica se é uma Lista e se está vazia
         env.insert(
             "null?".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 let is_null = match &args[0] {
                     LispExp::Nil => true,
                     LispExp::List(vec) => vec.is_empty(),
@@ -178,8 +180,14 @@ pub fn standard_env() -> Env {
         // 'car': Pega o primeiro elemento
         env.insert(
             "car".to_string(),
-            LispExp::Native(Rc::new(|args, _env| match &args[0] {
-                LispExp::Pair(car, _) => Ok((**car).clone()),
+            LispExp::Native(Rc::new(|args, _env, heap| match &args[0] {
+                LispExp::Pair(car, _) => {
+                    if let Some(val) = heap.get(*car) {
+                        Ok(val.clone())
+                    } else {
+                        Err("'car' must be used in a pair or list".to_string())
+                    }
+                }
                 LispExp::List(list) => list
                     .first()
                     .cloned()
@@ -190,8 +198,14 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "cdr".to_string(),
-            LispExp::Native(Rc::new(|args, _env| match &args[0] {
-                LispExp::Pair(_, cdr) => Ok((**cdr).clone()),
+            LispExp::Native(Rc::new(|args, _env, heap| match &args[0] {
+                LispExp::Pair(_, cdr) => {
+                    if let Some(val) = heap.get(*cdr) {
+                        Ok(val.clone())
+                    } else {
+                        Err("'cdr' must be used in a pair or list".to_string())
+                    }
+                }
                 LispExp::List(list) => {
                     if list.is_empty() {
                         return Err("cdr: empty list".to_string());
@@ -204,9 +218,9 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "cons".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 let head = args[0].clone();
-                let tail_val = pairs_to_vec(&args[1]);
+                let tail_val = pairs_to_vec(&args[1], heap);
 
                 match tail_val {
                     LispExp::List(tail) => {
@@ -214,18 +228,18 @@ pub fn standard_env() -> Env {
                         new.extend_from_slice(&tail);
                         Ok(LispExp::List(new))
                     }
-                    _ => Ok(LispExp::Pair(Rc::new(head), Rc::new(args[1].clone()))),
+                    _ => Ok(LispExp::Pair(heap.alloc(head), heap.alloc(args[1].clone()))),
                 }
             })),
         );
 
         env.insert(
             "list".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 let mut result = LispExp::Nil;
 
                 for arg in args.iter().rev() {
-                    result = LispExp::Pair(Rc::new(arg.clone()), Rc::new(result));
+                    result = LispExp::Pair(heap.alloc(arg.clone()), heap.alloc(result));
                 }
                 Ok(result)
             })),
@@ -233,7 +247,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "length".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if let Some(LispExp::List(list)) = args.first() {
                     Ok(LispExp::Number(list.len() as f64))
                 } else {
@@ -244,7 +258,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "not".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if args.len() != 1 {
                     return Err("'not' requires 1 argument".to_string());
                 }
@@ -264,14 +278,14 @@ pub fn standard_env() -> Env {
         // Void
         env.insert(
             "void".to_string(),
-            LispExp::Native(Rc::new(|_args, _env| Ok(LispExp::Void))),
+            LispExp::Native(Rc::new(|_, _, _| Ok(LispExp::Void))),
         );
 
         // Exemplo para subtração manual
         env.insert(
             "-".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                let floats: Result<Vec<f64>, _> = args.iter().map(get_float).collect();
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                let floats: Result<Vec<f64>, _> = args.iter().map(|x| get_float(x, heap)).collect();
                 let floats = floats?;
 
                 if floats.is_empty() {
@@ -295,9 +309,10 @@ pub fn standard_env() -> Env {
         // Divisão (/)
         env.insert(
             "/".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 // 1. Converte todos os argumentos para f64
-                let floats: Result<Vec<f64>, String> = args.iter().map(get_float).collect();
+                let floats: Result<Vec<f64>, String> =
+                    args.iter().map(|x| get_float(x, heap)).collect();
                 let floats = floats?; // Retorna erro se algum não for número
 
                 if floats.is_empty() {
@@ -327,12 +342,12 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "modulo".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if args.len() != 2 {
                     return Err("'modulo' requires 2 arguments".to_string());
                 }
-                let a = get_float(&args[0])?;
-                let b = get_float(&args[1])?;
+                let a = get_float(&args[0], heap)?;
+                let b = get_float(&args[1], heap)?;
                 Ok(LispExp::Number(a % b))
             })),
         );
@@ -340,12 +355,12 @@ pub fn standard_env() -> Env {
         // Potenciação (expt)
         env.insert(
             "expt".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if args.len() != 2 {
                     return Err("'expt' requires 2 arguments".to_string());
                 }
 
-                let floats: Result<Vec<f64>, _> = args.iter().map(get_float).collect();
+                let floats: Result<Vec<f64>, _> = args.iter().map(|x| get_float(x, heap)).collect();
                 let floats = floats?;
                 Ok(LispExp::Number(floats[0].powf(floats[1])))
             })),
@@ -354,7 +369,7 @@ pub fn standard_env() -> Env {
         // 'apply': (apply + (1 2)) -> (+ 1 2)
         env.insert(
             "apply".to_string(),
-            LispExp::Native(Rc::new(|args, env| {
+            LispExp::Native(Rc::new(|args, env, heap| {
                 if args.len() != 2 {
                     return Err("'apply' requires 2 arguments".to_string());
                 }
@@ -363,26 +378,26 @@ pub fn standard_env() -> Env {
 
                 let func_args = match &args[1] {
                     LispExp::List(l) => l,
-                    LispExp::Pair(_, _) => match pairs_to_vec(&args[1]) {
+                    LispExp::Pair(_, _) => match pairs_to_vec(&args[1], heap) {
                         LispExp::List(l) => &l.clone(),
                         _ => return Err("'apply' must be used in a list".to_string()),
                     },
                     _ => {
                         return Err(format!(
                             "Second argument of 'apply' must be a list, but got: {}",
-                            &args[1]
+                            lisp_fmt(&args[1], &heap)
                         ));
                     }
                 };
 
-                apply_procedure(proc, &func_args, env)
+                apply_procedure(proc, &func_args, env, heap)
             })),
         );
 
         // 'map': (map (lambda (x) (* x 2)) (1 2 3))
         env.insert(
             "map".to_string(),
-            LispExp::Native(Rc::new(|args, env| {
+            LispExp::Native(Rc::new(|args, env, heap| {
                 if args.len() != 2 {
                     return Err("'map' requires 2 arguments".to_string());
                 }
@@ -395,7 +410,7 @@ pub fn standard_env() -> Env {
 
                 let mut res_list = vec![];
                 for item in list_items {
-                    let val = apply_procedure(proc, &[item.clone()], env)?;
+                    let val = apply_procedure(proc, &[item.clone()], env, heap)?;
                     res_list.push(val);
                 }
 
@@ -406,7 +421,7 @@ pub fn standard_env() -> Env {
         // 'begin': Retorna o último argumento
         env.insert(
             "begin".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 args.last()
                     .cloned()
                     .ok_or_else(|| "'begin' requires at least 1 argument".to_string())
@@ -415,28 +430,28 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "equal?".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if args.len() != 2 {
                     return Err("equal? requires 2 arguments".to_string());
                 }
-                Ok(LispExp::Bool(args[0] == args[1]))
+                Ok(LispExp::Bool(is_deep_equal(&args[0], &args[1], heap)))
             })),
         );
 
         env.insert(
             "display".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 for arg in args.iter() {
-                    print!("{}", arg);
+                    print!("{}", lisp_fmt(&arg, &heap));
                 }
                 Ok(LispExp::Void)
             })),
         );
         env.insert(
             "displayln".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 for arg in args.iter() {
-                    print!("{}", arg);
+                    print!("{}", lisp_fmt(&arg, &heap));
                 }
                 println!();
                 Ok(LispExp::Void)
@@ -445,7 +460,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-contains?".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if args.len() != 2 {
                     return Err("'string-contains?' requires 2 arguments".to_string());
                 }
@@ -464,7 +479,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-split".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if let (Some(LispExp::Str(s)), Some(LispExp::Str(delim))) =
                     (args.get(0), args.get(1))
                 {
@@ -473,7 +488,7 @@ pub fn standard_env() -> Env {
                         .map(|s| LispExp::Str(s.to_string()))
                         .collect();
 
-                    Ok(vec_to_pairs(&LispExp::List(parts)))
+                    Ok(vec_to_pairs(&LispExp::List(parts), heap))
                 } else {
                     Err("'string-split' requires 2 strings".to_string())
                 }
@@ -482,13 +497,16 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-append".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, heap| {
                 let mut buffer = String::new();
                 for arg in args {
                     if let LispExp::Str(s) = arg {
                         buffer.push_str(s);
                     } else {
-                        return Err(format!("'string-append' expects strings, but got: {}", arg));
+                        return Err(format!(
+                            "'string-append' expects strings, but got: {}",
+                            lisp_fmt(&arg, &heap)
+                        ));
                     }
                 }
                 Ok(LispExp::Str(buffer))
@@ -497,7 +515,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-length".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if args.len() != 1 {
                     return Err("'string-length' requires only 1 argument".to_string());
                 }
@@ -512,7 +530,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-empty?".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if let Some(LispExp::Str(s)) = args.first() {
                     return Ok(LispExp::Bool(s.trim().is_empty()));
                 }
@@ -523,7 +541,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string-trim".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if args.len() != 1 {
                     return Err("'string-trim' requires only 1 argument".to_string());
                 }
@@ -538,7 +556,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "to-upper".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if args.len() != 1 {
                     return Err("'to-upper' requires only 1 argument".to_string());
                 }
@@ -553,7 +571,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "to-lower".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if args.len() != 1 {
                     return Err("'to-lower' requires only 1 argument".to_string());
                 }
@@ -568,7 +586,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "number->string".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if let Some(LispExp::Number(n)) = args.first() {
                     Ok(LispExp::Str(n.to_string()))
                 } else {
@@ -579,7 +597,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "string->number".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if let Some(LispExp::Str(s)) = args.first() {
                     if let Ok(num) = s.parse::<f64>() {
                         Ok(LispExp::Number(num))
@@ -594,10 +612,10 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "substring".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if let LispExp::Str(s) = args[0].clone() {
-                    let start = get_float(&args[1])? as usize;
-                    let end = get_float(&args[2])? as usize;
+                    let start = get_float(&args[1], heap)? as usize;
+                    let end = get_float(&args[2], heap)? as usize;
                     let subs: &str = &s[start..end];
                     return Ok(LispExp::Str(subs.to_string()));
                 }
@@ -608,7 +626,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "load".to_string(),
-            LispExp::Native(Rc::new(|args, env| {
+            LispExp::Native(Rc::new(|args, env, heap| {
                 if args.len() != 1 {
                     return Err("'load' requires 1 argument (path)".to_string());
                 }
@@ -617,13 +635,13 @@ pub fn standard_env() -> Env {
                     _ => return Err("Source path must be a string literal".to_string()),
                 };
 
-                run_script(path_str, env)
+                run_script(path_str, env, heap)
             })),
         );
 
         env.insert(
             "shell".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if let Some(LispExp::Str(cmd_str)) = args.first() {
                     let output = Command::new("sh")
                         .arg("-c")
@@ -642,21 +660,21 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "eval".to_string(),
-            LispExp::Native(Rc::new(|args, env| {
+            LispExp::Native(Rc::new(|args, env, heap| {
                 if args.len() != 1 {
                     return Err("'eval' requires 1 argument".to_string());
                 }
 
-                let ast = pairs_to_vec(&args[0]);
-                let expanded_ast = expand_macros(ast, env)?;
+                let ast = pairs_to_vec(&args[0], heap);
+                let expanded_ast = expand_macros(ast, env, heap)?;
 
                 if expanded_ast != LispExp::Void {
                     let mut chunk = Chunk::new();
-                    compile(&expanded_ast, &mut chunk, false)?;
+                    compile(&expanded_ast, &mut chunk, false, heap)?;
                     chunk.code.push(OpCode::Return);
 
                     let mut sub_vm = Vm::new();
-                    sub_vm.execute(Rc::new(chunk), env.clone())
+                    sub_vm.execute(Rc::new(chunk), env.clone(), heap)
                 } else {
                     Ok(LispExp::Void)
                 }
@@ -665,12 +683,12 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "sleep".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if args.len() != 1 {
                     return Err("'sleep' requires 1 argument".to_string());
                 }
 
-                let millis = get_float(&args[0])?;
+                let millis = get_float(&args[0], heap)?;
                 std::thread::sleep(Duration::from_millis(millis as i64 as u64));
 
                 Ok(LispExp::Void)
@@ -679,7 +697,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "get-env".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if let Some(LispExp::Str(key)) = args.first() {
                     match std::env::var(key) {
                         Ok(val) => Ok(LispExp::Str(val)),
@@ -693,7 +711,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "cd".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if let Some(LispExp::Str(path)) = args.first() {
                     if let Err(e) = std::env::set_current_dir(path) {
                         return Err(format!("Error changing directory '{}': {}", path, e));
@@ -707,7 +725,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "slurp".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, _| {
                 if let Some(LispExp::Str(path)) = args.first() {
                     match std::fs::read_to_string(path) {
                         Ok(content) => Ok(LispExp::Str(content)),
@@ -723,7 +741,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "spit".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if args.len() != 2 {
                     return Err(
                         "'spit / write-file' requires 2 arguments (path and content)".to_string(),
@@ -744,7 +762,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "not".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, _| {
                 if let Some(LispExp::Bool(b)) = args.first() {
                     return Ok(LispExp::Bool(!b));
                 }
@@ -754,7 +772,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "type-of".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
+            LispExp::Native(Rc::new(|args, _, heap| {
                 if let Some(exp) = args.first() {
                     match exp {
                         LispExp::Symbol(_) => Ok(LispExp::Str("symbol".to_string())),
@@ -766,16 +784,18 @@ pub fn standard_env() -> Env {
                         LispExp::Lambda(_) => Ok(LispExp::Str("procedure".to_string())),
                         LispExp::Macro(_) => Ok(LispExp::Str("macro".to_string())),
                         LispExp::Void => Ok(LispExp::Str("<void>".to_string())),
-                        LispExp::Pair(_, cdr) => match &**cdr {
-                            LispExp::Pair(_, _) | LispExp::List(_) | LispExp::Nil => {
-                                Ok(LispExp::Str("list".to_string()))
-                            }
+                        LispExp::Pair(_, cdr) => match heap.get(*cdr) {
+                            Some(LispExp::Pair(_, _))
+                            | Some(LispExp::List(_))
+                            | Some(LispExp::Nil) => Ok(LispExp::Str("list".to_string())),
                             _ => Ok(LispExp::Str("pair".to_string())),
                         },
                         LispExp::Nil => Ok(LispExp::Str("()".to_string())),
                         LispExp::Vector(_) => Ok(LispExp::Str("vector".to_string())),
                         LispExp::HashMap(_) => Ok(LispExp::Str("hashmap".to_string())),
                         LispExp::VmClosure { .. } => Ok(LispExp::Str("procedure".to_string())),
+                        LispExp::VectorData(_) => Ok(LispExp::Str("<vector-data>".to_string())),
+                        LispExp::HashMapData(_) => Ok(LispExp::Str("<hmap-data>".to_string())),
                     }
                 } else {
                     Err("'type-of' expects a value".to_string())
@@ -785,7 +805,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "require".to_string(),
-            LispExp::Native(Rc::new(|args, env| {
+            LispExp::Native(Rc::new(|args, env, heap| {
                 if let Some(LispExp::Str(path)) = args.first() {
                     let abs_path = std::fs::canonicalize(path)
                         .map_err(|e| format!("File not found: {}", e))?
@@ -795,7 +815,7 @@ pub fn standard_env() -> Env {
                     if env.borrow().loaded_files.contains(&abs_path) {
                         return Ok(LispExp::Void);
                     }
-                    run_script(path, env)
+                    run_script(path, env, heap)
                 } else {
                     Err("'require' expects a string as path".to_string())
                 }
@@ -804,16 +824,21 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "vector".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                Ok(LispExp::Vector(Rc::new(RefCell::new(args.to_vec()))))
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                let ref_id = heap.alloc(LispExp::VectorData(args.to_vec()));
+                Ok(LispExp::Vector(ref_id))
             })),
         );
 
         env.insert(
             "vector->list".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                if let Some(LispExp::Vector(vec)) = args.first() {
-                    Ok(vec_to_pairs(&LispExp::List(vec.borrow().to_vec())))
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let Some(LispExp::Vector(vec_ref)) = args.first() {
+                    let vec_data = match heap.get(*vec_ref) {
+                        Some(LispExp::VectorData(data)) => data,
+                        _ => return Err("Invalid vector reference".to_string()),
+                    };
+                    Ok(vec_to_pairs(&LispExp::List(vec_data.to_vec()), heap))
                 } else {
                     Ok(LispExp::Nil)
                 }
@@ -822,16 +847,23 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "vector-ref".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                if let (Some(LispExp::Vector(vec)), Some(LispExp::Number(idx))) =
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let (Some(LispExp::Vector(vec_ref)), Some(LispExp::Number(idx))) =
                     (args.get(0), args.get(1))
                 {
                     let index = *idx as usize;
-                    let v = vec.borrow();
-                    if index < v.len() {
-                        Ok(v[index].clone())
+                    let vec_data = match heap.get(*vec_ref) {
+                        Some(LispExp::VectorData(data)) => data,
+                        _ => return Err("Invalid vector reference".to_string()),
+                    };
+                    if index < vec_data.len() {
+                        Ok(vec_data[index].clone())
                     } else {
-                        Err(format!("Index {} out of bounds (len {})", index, v.len()))
+                        Err(format!(
+                            "Index {} out of bounds (len {})",
+                            index,
+                            vec_data.len()
+                        ))
                     }
                 } else {
                     Err("'vector-ref' expects vector and index".to_string())
@@ -841,17 +873,25 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "vector-set!".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                if let (Some(LispExp::Vector(vec)), Some(LispExp::Number(idx)), Some(val)) =
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let (Some(LispExp::Vector(vec_ref)), Some(LispExp::Number(idx)), Some(val)) =
                     (args.get(0), args.get(1), args.get(2))
                 {
                     let index = *idx as usize;
-                    let mut v = vec.borrow_mut();
-                    if index < v.len() {
-                        v[index] = val.clone();
+                    let vec_data = match heap.get_mut(*vec_ref) {
+                        Some(LispExp::VectorData(data)) => data,
+                        _ => return Err("Invalid vector reference".to_string()),
+                    };
+
+                    if index < vec_data.len() {
+                        vec_data[index] = val.clone();
                         Ok(LispExp::Void)
                     } else {
-                        Err(format!("Index {} out of bounds (len {})", index, v.len()))
+                        Err(format!(
+                            "Index {} out of bounds (len {})",
+                            index,
+                            vec_data.len()
+                        ))
                     }
                 } else {
                     Err("'vector-set!' expects vector, index and value".to_string())
@@ -861,9 +901,14 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "vector-push!".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
-                if let (Some(LispExp::Vector(vec)), Some(val)) = (args.get(0), args.get(1)) {
-                    vec.borrow_mut().push(val.clone());
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let (Some(LispExp::Vector(vec_ref)), Some(val)) = (args.get(0), args.get(1)) {
+                    let vec_data = match heap.get_mut(*vec_ref) {
+                        Some(LispExp::VectorData(data)) => data,
+                        _ => return Err("Invalid vector reference".to_string()),
+                    };
+
+                    vec_data.push(val.clone());
                     Ok(LispExp::Void)
                 } else {
                     Err("'vector-push!' expects a vector and a value".to_string())
@@ -872,15 +917,17 @@ pub fn standard_env() -> Env {
         );
         env.insert(
             "make-hash".to_string(),
-            LispExp::Native(Rc::new(|_args, _env| {
-                Ok(LispExp::HashMap(Rc::new(RefCell::new(RustHashMap::new()))))
+            LispExp::Native(Rc::new(|_args, _env, heap| {
+                let map = RustHashMap::new();
+                let ref_id = heap.alloc(LispExp::HashMapData(map));
+                Ok(LispExp::HashMap(ref_id))
             })),
         );
 
         env.insert(
             "hash-set!".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
-                if let (Some(LispExp::HashMap(map)), Some(key_exp), Some(val)) =
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let (Some(LispExp::HashMap(map_ref)), Some(key_exp), Some(val)) =
                     (args.get(0), args.get(1), args.get(2))
                 {
                     let key_str = match key_exp {
@@ -888,7 +935,12 @@ pub fn standard_env() -> Env {
                         _ => return Err("The hash key must be a string or symbol".to_string()),
                     };
 
-                    map.borrow_mut().insert(key_str, val.clone());
+                    let map_data = match heap.get_mut(*map_ref) {
+                        Some(LispExp::HashMapData(data)) => data,
+                        _ => return Err("Invalid hashmap reference".to_string()),
+                    };
+
+                    map_data.insert(key_str, val.clone());
                     Ok(LispExp::Void)
                 } else {
                     Err("hash-set! expects hashmap, key and value".to_string())
@@ -898,14 +950,20 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "hash-ref".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
-                if let (Some(LispExp::HashMap(map)), Some(key_exp)) = (args.get(0), args.get(1)) {
+            LispExp::Native(Rc::new(|args, _env, heap| {
+                if let (Some(LispExp::HashMap(map_ref)), Some(key_exp)) = (args.get(0), args.get(1))
+                {
                     let key_str = match key_exp {
                         LispExp::Str(s) | LispExp::Symbol(s) => s.clone(),
                         _ => return Err("The hash key must be a string or symbol".to_string()),
                     };
 
-                    match map.borrow().get(&key_str) {
+                    let map_data = match heap.get(*map_ref) {
+                        Some(LispExp::HashMapData(data)) => data,
+                        _ => return Err("Invalid hashmap reference".to_string()),
+                    };
+
+                    match map_data.get(&key_str) {
                         Some(val) => Ok(val.clone()),
                         None => Ok(LispExp::Nil),
                     }
@@ -917,13 +975,19 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "hash-keys".to_string(),
-            LispExp::Native(Rc::new(|args, _| {
-                if let Some(LispExp::HashMap(map)) = args.first() {
+            LispExp::Native(Rc::new(|args, _, heap| {
+                if let Some(LispExp::HashMap(map_ref)) = args.first() {
+                    let keys: Vec<String> = match heap.get(*map_ref) {
+                        Some(LispExp::HashMapData(data)) => data.keys().cloned().collect(),
+                        _ => return Err("Invalid hashmap reference".to_string()),
+                    };
+
                     let mut keys_list = LispExp::Nil;
 
-                    for key in map.borrow().keys() {
-                        keys_list =
-                            LispExp::Pair(Rc::new(LispExp::Str(key.clone())), Rc::new(keys_list));
+                    for key in keys {
+                        let key_exp = heap.alloc(LispExp::Str(key));
+                        let curr_list_ref = heap.alloc(keys_list);
+                        keys_list = LispExp::Pair(key_exp, curr_list_ref);
                     }
                     Ok(keys_list)
                 } else {
@@ -934,10 +998,10 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "parse-json".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 if let Some(LispExp::Str(json_str)) = args.first() {
                     match serde_json::from_str::<Value>(json_str) {
-                        Ok(val) => Ok(json_to_lisp(&val)),
+                        Ok(val) => Ok(json_to_lisp(&val, heap)),
                         Err(e) => Err(format!("Error parsing JSON: {}", e)),
                     }
                 } else {
@@ -948,7 +1012,7 @@ pub fn standard_env() -> Env {
 
         env.insert(
             "hash".to_string(),
-            LispExp::Native(Rc::new(|args, _env| {
+            LispExp::Native(Rc::new(|args, _env, heap| {
                 let mut map = RustHashMap::new();
                 let mut i = 0;
                 while i + 1 < args.len() {
@@ -959,7 +1023,44 @@ pub fn standard_env() -> Env {
                     map.insert(key_str, args[i + 1].clone());
                     i += 2;
                 }
-                Ok(LispExp::HashMap(Rc::new(RefCell::new(map))))
+                let map_data = LispExp::HashMapData(map);
+                Ok(LispExp::HashMap(heap.alloc(map_data)))
+            })),
+        );
+
+        env.insert(
+            "random".to_string(),
+            LispExp::Native(Rc::new(|args, _, _| {
+                let mut rng = rand::rng();
+
+                if args.len() != 2 {
+                    return Err(format!(
+                        "'random' expects 2 arguments, but got {}",
+                        args.len()
+                    ));
+                }
+
+                if let (Some(LispExp::Number(low)), Some(LispExp::Number(high))) =
+                    (args.get(0), args.get(1))
+                {
+                    let num = rng.random_range(*low..*high);
+                    Ok(LispExp::Number(num))
+                } else {
+                    Err("'random' expects a lower and a higher bound".to_string())
+                }
+            })),
+        );
+
+        env.insert(
+            "gc".to_string(),
+            LispExp::Native(Rc::new(|_args, env_ref, heap| {
+                let before = heap.memory.len() - heap.free_list.len();
+                collect_garbage(heap, env_ref, &LispExp::Void, &[], true);
+
+                let after = heap.memory.len() - heap.free_list.len();
+                let collected = before - after;
+                println!("[GC] Cleaned {} object(s).", collected);
+                Ok(LispExp::Void)
             })),
         );
     }
@@ -967,7 +1068,7 @@ pub fn standard_env() -> Env {
     lisp_env
 }
 
-fn json_to_lisp(value: &Value) -> LispExp {
+fn json_to_lisp(value: &Value, heap: &mut Heap) -> LispExp {
     match value {
         Value::Null => LispExp::Nil,
         Value::Bool(b) => LispExp::Bool(*b),
@@ -982,16 +1083,18 @@ fn json_to_lisp(value: &Value) -> LispExp {
         Value::Array(arr) => {
             let mut vec = vec![];
             for item in arr {
-                vec.push(json_to_lisp(item));
+                vec.push(json_to_lisp(item, heap));
             }
-            LispExp::Vector(Rc::new(RefCell::new(vec)))
+            let vec_data = LispExp::VectorData(vec);
+            LispExp::Vector(heap.alloc(vec_data))
         }
         Value::Object(obj) => {
             let mut map = RustHashMap::new();
             for (k, v) in obj {
-                map.insert(k.clone(), json_to_lisp(v));
+                map.insert(k.clone(), json_to_lisp(v, heap));
             }
-            LispExp::HashMap(Rc::new(RefCell::new(map)))
+            let map_data = LispExp::HashMapData(map);
+            LispExp::HashMap(heap.alloc(map_data))
         }
     }
 }

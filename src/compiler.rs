@@ -2,11 +2,17 @@ use std::rc::Rc;
 
 use crate::{
     expr::LispExp,
+    heap::Heap,
     helpers::{pairs_to_vec, vec_to_pairs},
     vm::{Chunk, OpCode},
 };
 
-pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), String> {
+pub fn compile(
+    exp: &LispExp,
+    chunk: &mut Chunk,
+    is_tail: bool,
+    heap: &mut Heap,
+) -> Result<(), String> {
     let aritmethic_operators = ["+", "-", "*", "/"];
     let comparison_operators = ["<", ">", "=", "<=", ">="];
 
@@ -24,8 +30,8 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
             }
         }
         LispExp::Pair(_, _) => {
-            let ast_list = pairs_to_vec(exp);
-            compile(&ast_list, chunk, is_tail)?
+            let ast_list = pairs_to_vec(exp, heap);
+            compile(&ast_list, chunk, is_tail, heap)?
         }
         LispExp::List(list) => {
             if list.is_empty() {
@@ -37,7 +43,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     if list.len() != 2 {
                         return Err("quote requires 1 argument".to_string());
                     }
-                    let runtime_list = vec_to_pairs(&list[1]);
+                    let runtime_list = vec_to_pairs(&list[1], heap);
 
                     chunk.code.push(OpCode::PushConst(runtime_list));
                     if is_tail {
@@ -50,7 +56,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     }
                     match &list[1] {
                         LispExp::Symbol(name) => {
-                            compile(&list[2], chunk, false)?;
+                            compile(&list[2], chunk, false, heap)?;
                             chunk.code.push(OpCode::SetVar(name.clone()));
                             if is_tail {
                                 chunk.code.push(OpCode::Return);
@@ -61,7 +67,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                 }
                 LispExp::Symbol(s) if s == "define" => match &list[1] {
                     LispExp::Symbol(name) => {
-                        compile(&list[2], chunk, false)?;
+                        compile(&list[2], chunk, false, heap)?;
                         chunk.code.push(OpCode::DefVar(name.clone()));
                         if is_tail {
                             chunk.code.push(OpCode::Return);
@@ -79,7 +85,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                             let mut closure_chunk = Chunk::new();
                             for (i, body_exp) in list[2..].iter().enumerate() {
                                 let last = i == (list.len() - 3);
-                                compile(body_exp, &mut closure_chunk, last)?;
+                                compile(body_exp, &mut closure_chunk, last, heap)?;
                                 if !last {
                                     closure_chunk.code.push(OpCode::Pop);
                                 }
@@ -102,10 +108,10 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     if list.len() < 3 {
                         return Err(format!("{} requires arguments", s));
                     }
-                    compile(&list[1], chunk, false)?;
+                    compile(&list[1], chunk, false, heap)?;
 
                     for arg in &list[2..] {
-                        compile(arg, chunk, false)?;
+                        compile(arg, chunk, false, heap)?;
 
                         match s.as_str() {
                             "+" => chunk.code.push(OpCode::Add),
@@ -125,7 +131,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                         return Err(format!("{} requires at least 2 arguments", s));
                     }
                     for arg in &list[1..] {
-                        compile(arg, chunk, false)?;
+                        compile(arg, chunk, false, heap)?;
                     }
 
                     match s.as_str() {
@@ -150,7 +156,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     }
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false)?;
+                        compile(arg, chunk, false, heap)?;
                     }
 
                     match s.as_str() {
@@ -165,12 +171,12 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     }
                 }
                 LispExp::Symbol(s) if s == "if" => {
-                    compile(&list[1], chunk, false)?; // condition
+                    compile(&list[1], chunk, false, heap)?; // condition
 
                     let jump_if_false_idx = chunk.code.len();
                     chunk.code.push(OpCode::JumpIfFalse(0));
 
-                    compile(&list[2], chunk, is_tail)?; // then
+                    compile(&list[2], chunk, is_tail, heap)?; // then
 
                     let jump_idx = chunk.code.len();
                     if !is_tail {
@@ -181,7 +187,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     chunk.code[jump_if_false_idx] = OpCode::JumpIfFalse(chunk.code.len());
 
                     if list.len() > 3 {
-                        compile(&list[3], chunk, is_tail)?;
+                        compile(&list[3], chunk, is_tail, heap)?;
                     } else if !is_tail {
                         chunk.code.push(OpCode::PushConst(LispExp::Void));
                     }
@@ -202,7 +208,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     // Compila body. Apenas ultima exp é is_tail
                     for (i, body_exp) in list[2..].iter().enumerate() {
                         let last = i == (list.len() - 3);
-                        compile(body_exp, &mut closure_chunk, last)?;
+                        compile(body_exp, &mut closure_chunk, last, heap)?;
                         if !last {
                             closure_chunk.code.push(OpCode::Pop);
                         }
@@ -217,10 +223,10 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                     }
                 }
                 _ => {
-                    compile(head, chunk, false)?;
+                    compile(head, chunk, false, heap)?;
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false)?;
+                        compile(arg, chunk, false, heap)?;
                     }
 
                     if is_tail {

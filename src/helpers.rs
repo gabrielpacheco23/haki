@@ -1,6 +1,5 @@
-use std::rc::Rc;
-
 use crate::eval;
+use crate::heap::Heap;
 use crate::vm::Vm;
 use crate::{
     env::{Env, LispEnv},
@@ -8,10 +7,10 @@ use crate::{
 };
 
 // Helper para converter qualquer número Lisp para f64
-pub fn get_float(exp: &LispExp) -> Result<f64, String> {
+pub fn get_float(exp: &LispExp, heap: &Heap) -> Result<f64, String> {
     match exp {
         LispExp::Number(f) => Ok(*f),
-        _ => Err(format!("Expected a number, got: {}", exp)),
+        _ => Err(format!("Expected a number, got: {}", lisp_fmt(&exp, heap))),
     }
 }
 
@@ -39,21 +38,23 @@ macro_rules! ensure_tonicity {
 #[macro_export]
 macro_rules! def_math {
     ($func:expr) => {
-        Rc::new(move |args: &[LispExp], _env| -> Result<LispExp, String> {
-            if args.len() != 1 {
-                return Err("This procedure requires exactly 1 argument".to_string());
-            }
-            let val = get_float(&args[0])?;
-            Ok(LispExp::Number($func(val)))
-        })
+        Rc::new(
+            move |args: &[LispExp], _env, heap| -> Result<LispExp, String> {
+                if args.len() != 1 {
+                    return Err("This procedure requires exactly 1 argument".to_string());
+                }
+                let val = get_float(&args[0], &heap)?;
+                Ok(LispExp::Number($func(val)))
+            },
+        )
     };
 }
 
 #[macro_export]
 macro_rules! def_cmp {
     ($op:tt) => {
-        LispExp::Native(Rc::new(move |args: &[LispExp], _env: &mut Env| -> Result<LispExp, String> {
-            let floats: Result<Vec<f64>, String> = args.iter().map(get_float).collect();
+        LispExp::Native(Rc::new(move |args: &[LispExp], _env: &mut Env, heap| -> Result<LispExp, String> {
+            let floats: Result<Vec<f64>, String> = args.iter().map(|x| get_float(x, &heap)).collect();
             let floats = floats?;
 
             if floats.len() < 2 {
@@ -79,27 +80,29 @@ macro_rules! def_cmp {
 #[macro_export]
 macro_rules! def_fold {
     ($initial:expr, $op:expr) => {
-        Rc::new(move |args: &[LispExp], _env| -> Result<LispExp, String> {
-            let mut acc = $initial;
-            for (i, arg) in args.iter().enumerate() {
-                let val = get_float(arg)?;
-                if i == 0 && args.len() == 1 && $initial == 0.0 {
-                    // Caso especial: (+ 5) ou (min 5) -> retorna 5
-                    acc = val;
-                } else if i == 0 {
-                    // Se for o primeiro item, inicializamos o acumulador com ele
-                    // (para min/max isso é importante, para + nem tanto)
-                    acc = match $op(acc, val) {
-                        // Truque para min/max funcionarem com o primeiro elemento
-                        _ if $initial == f64::INFINITY || $initial == f64::NEG_INFINITY => val,
-                        res => res,
-                    };
-                } else {
-                    acc = $op(acc, val);
+        Rc::new(
+            move |args: &[LispExp], _env, heap| -> Result<LispExp, String> {
+                let mut acc = $initial;
+                for (i, arg) in args.iter().enumerate() {
+                    let val = get_float(arg, &heap)?;
+                    if i == 0 && args.len() == 1 && $initial == 0.0 {
+                        // Caso especial: (+ 5) ou (min 5) -> retorna 5
+                        acc = val;
+                    } else if i == 0 {
+                        // Se for o primeiro item, inicializamos o acumulador com ele
+                        // (para min/max isso é importante, para + nem tanto)
+                        acc = match $op(acc, val) {
+                            // Truque para min/max funcionarem com o primeiro elemento
+                            _ if $initial == f64::INFINITY || $initial == f64::NEG_INFINITY => val,
+                            res => res,
+                        };
+                    } else {
+                        acc = $op(acc, val);
+                    }
                 }
-            }
-            Ok(LispExp::Number(acc))
-        })
+                Ok(LispExp::Number(acc))
+            },
+        )
     };
 }
 
@@ -107,7 +110,7 @@ macro_rules! def_fold {
 macro_rules! def_is {
     // $pattern: O padrão do match (ex: LispExp::List(_))
     ($pattern:pat) => {
-        Rc::new(|args: &[LispExp], _env| -> Result<LispExp, String> {
+        Rc::new(|args: &[LispExp], _env, _| -> Result<LispExp, String> {
             if args.len() != 1 {
                 return Err("Type check requires exactly 1 argument".to_string());
             }
@@ -134,6 +137,7 @@ pub fn apply_macro(
     macro_def: &LispLambda,
     args: &[LispExp],
     _env: &mut Env,
+    heap: &mut Heap,
 ) -> Result<LispExp, String> {
     let mut expansion_env = LispEnv::new(Some(macro_def.env.clone()));
 
@@ -189,12 +193,17 @@ pub fn apply_macro(
         return Err("Invalid parameters".to_string());
     }
 
-    eval((*macro_def.body).clone(), &mut expansion_env)
+    eval((*macro_def.body).clone(), &mut expansion_env, heap)
 }
 
-pub fn apply_procedure(proc: &LispExp, args: &[LispExp], env: &mut Env) -> Result<LispExp, String> {
+pub fn apply_procedure(
+    proc: &LispExp,
+    args: &[LispExp],
+    env: &mut Env,
+    heap: &mut Heap,
+) -> Result<LispExp, String> {
     match proc {
-        LispExp::Native(f) => f(args, env),
+        LispExp::Native(f) => f(args, env, heap),
         LispExp::Lambda(lambda) => {
             let new_env = LispEnv::new(Some(lambda.env.clone()));
 
@@ -215,7 +224,7 @@ pub fn apply_procedure(proc: &LispExp, args: &[LispExp], env: &mut Env) -> Resul
                 return Err("Invalid lambda parameters".to_string());
             }
 
-            eval((*lambda.body).clone(), &mut new_env.clone())
+            eval((*lambda.body).clone(), &mut new_env.clone(), heap)
         }
         LispExp::VmClosure {
             params,
@@ -232,19 +241,24 @@ pub fn apply_procedure(proc: &LispExp, args: &[LispExp], env: &mut Env) -> Resul
             }
 
             let mut sub_vm = Vm::new();
-            sub_vm.execute(chunk.clone(), new_env)
+            sub_vm.execute(chunk.clone(), new_env, heap)
         }
-        _ => Err(format!("Object not callable using eval: {}", proc)),
+        _ => Err(format!(
+            "Object not callable using eval: {}",
+            lisp_fmt(&proc, &heap)
+        )),
     }
 }
 
-pub fn expand_quasiquote(exp: &LispExp, env: &mut Env) -> Result<LispExp, String> {
+pub fn expand_quasiquote(exp: &LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     match exp {
-        LispExp::List(l) if l.len() == 2 && is_symbol(&l[0], "unquote") => eval(l[1].clone(), env),
+        LispExp::List(l) if l.len() == 2 && is_symbol(&l[0], "unquote") => {
+            eval(l[1].clone(), env, heap)
+        }
         LispExp::List(l) => {
             let mut new_list = vec![];
             for item in l {
-                new_list.push(expand_quasiquote(item, env)?);
+                new_list.push(expand_quasiquote(item, env, heap)?);
             }
 
             Ok(LispExp::List(new_list))
@@ -280,8 +294,8 @@ pub fn env_set(env: &Env, var: &str, val: LispExp) -> Result<(), String> {
     }
 }
 
-pub fn expand_macros(ast: LispExp, env: &mut Env) -> Result<LispExp, String> {
-    let ast = pairs_to_vec(&ast);
+pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
+    let ast = pairs_to_vec(&ast, heap);
 
     match ast {
         LispExp::List(list) => {
@@ -292,7 +306,7 @@ pub fn expand_macros(ast: LispExp, env: &mut Env) -> Result<LispExp, String> {
             if let LispExp::Symbol(s) = &list[0] {
                 // Regra 0: defmacros
                 if s == "defmacro" {
-                    eval(LispExp::List(list.clone()), env)?;
+                    eval(LispExp::List(list.clone()), env, heap)?;
                     return Ok(LispExp::Void);
                 }
 
@@ -308,7 +322,7 @@ pub fn expand_macros(ast: LispExp, env: &mut Env) -> Result<LispExp, String> {
                     }
                     let mut new_list = vec![list[0].clone(), list[1].clone()];
                     for item in &list[2..] {
-                        new_list.push(expand_macros(item.clone(), env)?);
+                        new_list.push(expand_macros(item.clone(), env, heap)?);
                     }
                     return Ok(LispExp::List(new_list));
                 }
@@ -321,23 +335,23 @@ pub fn expand_macros(ast: LispExp, env: &mut Env) -> Result<LispExp, String> {
 
                     let mut new_list = vec![list[0].clone(), list[1].clone()];
                     for item in &list[2..] {
-                        new_list.push(expand_macros(item.clone(), env)?);
+                        new_list.push(expand_macros(item.clone(), env, heap)?);
                     }
                     return Ok(LispExp::List(new_list));
                 }
 
                 // Regra 4: É uma macro?
                 if let Some(macro_def) = find_macro(env, s) {
-                    let expanded_ast = apply_macro(&macro_def, &list[1..], env)?;
+                    let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
 
-                    return expand_macros(expanded_ast, env);
+                    return expand_macros(expanded_ast, env, heap);
                 }
             }
 
             // Regra 5: Chamada de função normal
             let mut new_list = vec![];
             for item in list {
-                new_list.push(expand_macros(item, env)?);
+                new_list.push(expand_macros(item, env, heap)?);
             }
             Ok(LispExp::List(new_list))
         }
@@ -359,29 +373,32 @@ fn find_macro(env: &Env, name: &str) -> Option<LispLambda> {
     None
 }
 
-pub fn pairs_to_vec(exp: &LispExp) -> LispExp {
+pub fn pairs_to_vec(exp: &LispExp, heap: &mut Heap) -> LispExp {
     match exp {
         LispExp::Pair(car, cdr) => {
             let mut vec = vec![];
 
-            vec.push(pairs_to_vec(car));
+            let car_val = heap.get(*car).unwrap().clone();
+            vec.push(pairs_to_vec(&car_val, heap));
 
-            let mut current = cdr.clone();
-            while let LispExp::Pair(next_car, next_cdr) = &*current {
-                vec.push(pairs_to_vec(next_car));
-                current = next_cdr.clone();
+            let mut curr_ref = *cdr;
+
+            while let Some(LispExp::Pair(next_car, next_cdr)) = heap.get(curr_ref).cloned() {
+                let next_car_val = heap.get(next_car).unwrap().clone();
+                vec.push(pairs_to_vec(&next_car_val, heap));
+                curr_ref = next_cdr;
             }
 
             LispExp::List(vec)
         }
 
         LispExp::Nil => LispExp::List(vec![]),
-        LispExp::List(vec) => LispExp::List(vec.iter().map(pairs_to_vec).collect()),
+        LispExp::List(vec) => LispExp::List(vec.iter().map(|x| pairs_to_vec(x, heap)).collect()),
         _ => exp.clone(),
     }
 }
 
-pub fn vec_to_pairs(exp: &LispExp) -> LispExp {
+pub fn vec_to_pairs(exp: &LispExp, heap: &mut Heap) -> LispExp {
     match exp {
         LispExp::List(vec) => {
             if vec.is_empty() {
@@ -390,8 +407,8 @@ pub fn vec_to_pairs(exp: &LispExp) -> LispExp {
 
             let mut current = LispExp::Nil;
             for item in vec.iter().rev() {
-                let item_eval = vec_to_pairs(item);
-                current = LispExp::Pair(Rc::new(item_eval), Rc::new(current));
+                let item_eval = vec_to_pairs(item, heap);
+                current = LispExp::Pair(heap.alloc(item_eval), heap.alloc(current));
             }
             current
         }

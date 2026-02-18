@@ -7,9 +7,10 @@ use rustyline::validate::Validator;
 use rustyline::{Editor, Helper};
 use std::borrow::Cow;
 
+use crate::expr::lisp_fmt;
+use crate::heap::Heap;
 use crate::{ExecMode, env::Env, expr::LispExp, run_source};
 
-#[allow(unused)]
 fn print_haki_splash() {
     let splash = r#"
     __  __      __   _
@@ -23,7 +24,7 @@ v1.0.0 - Developed by Gabriel Pacheco
     println!("{}", splash.bold().cyan());
 }
 
-pub fn repl(mut env: Env) {
+pub fn repl(mut env: Env, heap: &mut Heap) {
     print_haki_splash();
     println!("{}", "Press Ctrl+D or type 'quit' to exit.\n".dimmed());
 
@@ -42,7 +43,7 @@ pub fn repl(mut env: Env) {
 
         match rl.readline(&prompt) {
             Ok(line) => {
-                let input = line.trim_end(); // Remove espaços do final
+                let input = line.trim_end();
 
                 if buffer.is_empty() && (input == "exit" || input == "quit") {
                     break;
@@ -51,11 +52,9 @@ pub fn repl(mut env: Env) {
                     continue;
                 }
 
-                // Adiciona a linha ao buffer com a quebra de linha original
                 buffer.push_str(input);
                 buffer.push('\n');
 
-                // Valida o balanço dos parêntesis manualmente
                 let mut open_parens = 0;
                 let mut in_string = false;
                 let mut escape = false;
@@ -74,10 +73,9 @@ pub fn repl(mut env: Env) {
                     }
                 }
 
-                // Se o código terminou, nós executamos!
                 if open_parens <= 0 {
                     let code_to_run = buffer.trim();
-                    let _ = rl.add_history_entry(code_to_run); // Salva o bloco inteiro no histórico
+                    let _ = rl.add_history_entry(code_to_run);
 
                     let (mode, code) = if code_to_run.starts_with(":dump ") {
                         (ExecMode::Dump, &code_to_run[6..])
@@ -85,10 +83,10 @@ pub fn repl(mut env: Env) {
                         (ExecMode::Normal, code_to_run)
                     };
 
-                    match run_source(code, &mut env, mode) {
+                    match run_source(code, &mut env, mode, heap, false) {
                         Ok(val) => {
                             if mode == ExecMode::Normal && !matches!(val, LispExp::Void) {
-                                println!("=> {}", val.to_string().green());
+                                println!("=> {}", lisp_fmt(&val, &heap).to_string().green());
                             }
                         }
                         Err(e) => eprintln!("{} {}", "Error:".bold().red(), e.red()),
@@ -137,7 +135,6 @@ impl Highlighter for LispHelper {
         let mut match_idx = None;
         let mut trigger_idx = None;
 
-        // Lógica dos parêntesis inalterada, mas pronta para a nova cor
         if pos > 0 && pos <= line.len() {
             if let Some((idx, ')')) = line[..pos].char_indices().last() {
                 trigger_idx = Some(idx);
@@ -166,8 +163,6 @@ impl Highlighter for LispHelper {
             }
         }
 
-        // --- AQUI ESTÁ A CORRIGIDA ---
-        // Usamos Magenta Claro em Negrito (\x1b[1;95m) sem cor de fundo!
         let match_color = "\x1b[1;95m";
         let reset = "\x1b[0m";
 
@@ -190,10 +185,8 @@ impl Highlighter for LispHelper {
                 }
                 '(' | ')' | '[' | ']' if !in_string => {
                     if is_match {
-                        // Aplica a cor de "Destaque"
                         colored.push_str(&format!("{}{}{}", match_color, c, reset));
                     } else {
-                        // Cor normal (Ciano)
                         colored.push_str(&format!("\x1b[36m{}\x1b[0m", c));
                     }
                 }

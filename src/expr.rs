@@ -1,9 +1,13 @@
 use crate::env::Env;
+use crate::heap::Heap;
 use crate::vm::Chunk;
 
 use std::collections::HashMap as RustHashMap;
 
-pub type LispNative = Rc<dyn Fn(&[LispExp], &mut Env) -> Result<LispExp, String>>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GcRef(pub usize);
+
+pub type LispNative = Rc<dyn Fn(&[LispExp], &mut Env, &mut Heap) -> Result<LispExp, String>>;
 
 #[derive(Clone, Debug)]
 pub struct LispLambda {
@@ -19,15 +23,17 @@ pub enum LispExp {
     Number(f64),
     Bool(bool),
     Str(String),
+    Nil,
     List(Vec<LispExp>),
     Native(LispNative),
     Lambda(LispLambda),
     Macro(LispLambda),
     Void,
-    Pair(Rc<LispExp>, Rc<LispExp>),
-    Nil,
-    Vector(Rc<RefCell<Vec<LispExp>>>),
-    HashMap(Rc<RefCell<RustHashMap<String, LispExp>>>),
+    Pair(GcRef, GcRef),
+    Vector(GcRef),
+    HashMap(GcRef),
+    VectorData(Vec<LispExp>),
+    HashMapData(RustHashMap<String, LispExp>),
     VmClosure {
         params: Vec<String>,
         chunk: Rc<Chunk>,
@@ -35,60 +41,89 @@ pub enum LispExp {
     },
 }
 
-use std::cell::RefCell;
-use std::fmt::Display;
 use std::rc::Rc;
-impl Display for LispExp {
+
+pub struct LispFmt<'a> {
+    pub exp: &'a LispExp,
+    pub heap: &'a Heap,
+}
+
+pub fn lisp_fmt<'a>(exp: &'a LispExp, heap: &'a Heap) -> LispFmt<'a> {
+    LispFmt { exp, heap }
+}
+
+impl<'a> std::fmt::Display for LispFmt<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LispExp::Symbol(s) => write!(f, "{}", s),
+        match self.exp {
+            LispExp::Number(n) => write!(f, "{}", n),
+            // LispExp::Str(s) => write!(f, "\"{}\"", s),
             LispExp::Str(s) => write!(f, "{}", s),
-            LispExp::Number(num) => write!(f, "{}", num),
-            LispExp::List(exprs) => {
-                write!(f, "(")?;
-                for (i, expr) in exprs.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", expr)?;
-                }
-                write!(f, ")")
-            }
-            LispExp::Native(_) => write!(f, "<procedure>"),
-            LispExp::Lambda(_) => write!(f, "<procedure>"),
-            LispExp::Macro(_) => write!(f, "<macro>"),
-            LispExp::Bool(b) => write!(f, "{}", lisp_bool(b)),
-            LispExp::Void => write!(f, "<void>"),
-            #[allow(unused)]
-            LispExp::VmClosure { params, chunk, env } => write!(f, "<vm:closure>"),
+            LispExp::Symbol(s) => write!(f, "{}", s),
+            LispExp::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
+            LispExp::Nil => write!(f, "()"),
+            LispExp::Void => write!(f, ""),
             LispExp::Pair(car, cdr) => {
-                write!(f, "({}", car)?;
-                let mut current = cdr.clone();
+                write!(f, "(")?;
 
-                while let LispExp::Pair(next_car, next_cdr) = &*current {
-                    write!(f, " {}", next_car)?;
-                    current = next_cdr.clone();
+                let car_val = self.heap.get(*car).unwrap();
+                write!(f, "{}", lisp_fmt(&car_val, self.heap))?;
+
+                let mut current = *cdr;
+                while let Some(LispExp::Pair(next_car, next_cdr)) = self.heap.get(current) {
+                    let next_car_val = self.heap.get(*next_car).unwrap();
+                    write!(f, " {}", lisp_fmt(&next_car_val, self.heap))?;
+                    current = *next_cdr;
                 }
 
-                if let LispExp::Nil = &*current {
+                if let Some(LispExp::Nil) = self.heap.get(current) {
                     write!(f, ")")
                 } else {
-                    write!(f, " . {})", current)
+                    let last_val = self.heap.get(current).unwrap();
+                    write!(f, " . {})", lisp_fmt(&last_val, self.heap))
                 }
             }
-            LispExp::Nil => write!(f, "()"),
-            LispExp::Vector(vec) => {
-                let strings: Vec<String> = vec.borrow().iter().map(|x| x.to_string()).collect();
-                write!(f, "#({})", strings.join(" "))
-            }
-            LispExp::HashMap(map) => {
-                let m = map.borrow();
-                let mut entries = vec![];
-                for (k, v) in m.iter() {
-                    entries.push(format!("(\"{}\" . {})", k, v));
+
+            LispExp::Vector(vec_ref) => {
+                if let Some(LispExp::VectorData(data)) = self.heap.get(*vec_ref) {
+                    write!(f, "[")?;
+                    for (i, item) in data.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{}", lisp_fmt(&item, self.heap))?;
+                    }
+                    write!(f, "]")
+                } else {
+                    write!(f, "<invalid-vector-ref>")
                 }
-                write!(f, "#hash({})", entries.join(" "))
             }
+
+            LispExp::HashMap(map_ref) => {
+                if let Some(LispExp::HashMapData(data)) = self.heap.get(*map_ref) {
+                    write!(f, "{} ", '{')?;
+                    for (i, item) in data.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(
+                            f,
+                            "{}: ",
+                            lisp_fmt(&LispExp::Str(item.0.clone()), self.heap)
+                        )?;
+                        write!(f, "{}", lisp_fmt(&item.1, self.heap))?;
+                        if i != data.len() - 1 {
+                            write!(f, ",")?;
+                        }
+                    }
+                    write!(f, " {}", '}')
+                } else {
+                    write!(f, "<invalid-hashmap-ref>")
+                }
+            }
+
+            LispExp::VectorData(_) => write!(f, "<vector-data>"),
+            LispExp::HashMapData(_) => write!(f, "<hashmap-data>"),
+            _ => write!(f, "<unknown>"),
         }
     }
 }
@@ -96,34 +131,24 @@ impl Display for LispExp {
 use std::fmt;
 impl fmt::Debug for LispExp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{}", lisp_fmt(self, &Heap::new()))
     }
-}
-
-fn lisp_bool(b: &bool) -> String {
-    if *b {
-        return "#t".to_string();
-    }
-    "#f".to_string()
 }
 
 impl PartialEq for LispExp {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            // Comparação simples para tipos básicos
             (LispExp::Symbol(a), LispExp::Symbol(b)) => a == b,
             (LispExp::Str(a), LispExp::Str(b)) => a == b,
             (LispExp::Number(a), LispExp::Number(b)) => a == b,
             (LispExp::Bool(a), LispExp::Bool(b)) => a == b,
 
-            // Comparação recursiva para Listas (o Rust faz isso sozinho para Vecs)
             (LispExp::List(a), LispExp::List(b)) => a == b,
-            (LispExp::Vector(a), LispExp::Vector(b)) => **a == **b,
-            (LispExp::HashMap(a), LispExp::HashMap(b)) => **a == **b,
-            // Compara se os dois apontam para o mesmo local de memória (ponteiro)
+            (LispExp::Vector(a), LispExp::Vector(b)) => a == b,
+            (LispExp::HashMap(a), LispExp::HashMap(b)) => a == b,
             (LispExp::Native(a), LispExp::Native(b)) => Rc::ptr_eq(a, b),
             (LispExp::Lambda(a), LispExp::Lambda(b)) => *a.params == *b.params && a.body == b.body,
-            (LispExp::Pair(a1, a2), LispExp::Pair(b1, b2)) => **a1 == **b1 && **a2 == **b2,
+            (LispExp::Pair(a1, a2), LispExp::Pair(b1, b2)) => a1 == b1 && a2 == b2,
             (
                 LispExp::VmClosure {
                     params: a_p,
@@ -136,8 +161,85 @@ impl PartialEq for LispExp {
                     ..
                 },
             ) => a_p == b_p && Rc::ptr_eq(a_c, b_c),
-            (LispExp::Nil, LispExp::Nil) => true,
+            (LispExp::Nil, LispExp::Nil) | (LispExp::Void, LispExp::Void) => true,
             _ => false,
         }
+    }
+}
+
+pub fn is_deep_equal(a: &LispExp, b: &LispExp, heap: &Heap) -> bool {
+    use LispExp::*;
+    match (a, b) {
+        (Number(n1), Number(n2)) => n1 == n2,
+        (Str(s1), Str(s2)) => s1 == s2,
+        (Symbol(s1), Symbol(s2)) => s1 == s2,
+        (Bool(b1), Bool(b2)) => b1 == b2,
+        (Nil, Nil) | (Void, Void) => true,
+        (Pair(car1, cdr1), Pair(car2, cdr2)) => {
+            let v_car1 = heap.get(*car1).unwrap();
+            let v_car2 = heap.get(*car2).unwrap();
+
+            if !is_deep_equal(v_car1, v_car2, heap) {
+                return false;
+            }
+
+            let v_cdr1 = heap.get(*cdr1).unwrap();
+            let v_cdr2 = heap.get(*cdr2).unwrap();
+
+            is_deep_equal(v_cdr1, v_cdr2, heap)
+        }
+
+        (Vector(ref1), Vector(ref2)) => {
+            if ref1 == ref2 {
+                return true;
+            }
+
+            if let (Some(VectorData(vec1)), Some(VectorData(vec2))) =
+                (heap.get(*ref1), heap.get(*ref2))
+            {
+                if vec1.len() != vec2.len() {
+                    return false;
+                }
+
+                for (i, j) in vec1.iter().zip(vec2.iter()) {
+                    if !is_deep_equal(i, j, heap) {
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        (HashMap(ref1), HashMap(ref2)) => {
+            if ref1 == ref2 {
+                return true;
+            }
+
+            if let (Some(HashMapData(map1)), Some(HashMapData(map2))) =
+                (heap.get(*ref1), heap.get(*ref2))
+            {
+                if map1.len() != map2.len() {
+                    return false;
+                }
+
+                for (key, val1) in map1.iter() {
+                    match map2.get(key) {
+                        Some(val2) => {
+                            if !is_deep_equal(val1, val2, heap) {
+                                return false;
+                            }
+                        }
+                        None => return false,
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        _ => false,
     }
 }

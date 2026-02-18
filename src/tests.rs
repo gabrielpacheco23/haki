@@ -2,6 +2,7 @@
 mod tests {
     use crate::env::standard_env;
     use crate::expr::LispExp;
+    use crate::heap::Heap;
     use crate::{ExecMode, run_source};
 
     // --- FUNÇÃO AJUDANTE DE TESTES ---
@@ -9,14 +10,27 @@ mod tests {
     // DICA: Substitua `run_source` pelo nome real da função que você usa no seu main.rs
     // para compilar e rodar strings de código (a mesma usada no REPL).
     fn run_haki(code: &str) -> LispExp {
+        let mut heap = Heap::new();
         let mut env = standard_env();
 
         // Carrega as macros essenciais (certifique-se de que o caminho está correto no seu projeto)
         // Se a função `run_source` retornar Result, o `let _` ignora o retorno com segurança.
-        let _ = run_source("(load \"std/macros.lsp\")", &mut env, ExecMode::Normal);
-        let _ = run_source("(load \"std/lib.lsp\")", &mut env, ExecMode::Normal);
+        let _ = run_source(
+            "(load \"std/macros.lsp\")",
+            &mut env,
+            ExecMode::Normal,
+            &mut heap,
+            false,
+        );
+        let _ = run_source(
+            "(load \"std/lib.lsp\")",
+            &mut env,
+            ExecMode::Normal,
+            &mut heap,
+            false,
+        );
 
-        run_source(code, &mut env, ExecMode::Normal)
+        run_source(code, &mut env, ExecMode::Normal, &mut heap, false)
             .unwrap_or_else(|e| panic!("Erro no teste: {}\nCódigo: {}", e, code))
     }
 
