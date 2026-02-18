@@ -6,6 +6,7 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 
 ## ✨ Key Features
 
+* **Custom Garbage Collector:** A built-in Mark-and-Sweep GC utilizing a flat memory Arena. Replaces Rust's standard reference counting (`Rc`/`RefCell`) for blazing-fast allocations, zero memory fragmentation, and perfect circular reference resolution.
 * **Bytecode Virtual Machine:** Code is compiled into optimized OpCodes and executed on a stack-based VM.
 * **Tail Call Optimization (TCO):** Write infinite recursive loops without ever blowing up the call stack. Memory stays at O(1).
 * **Compile-Time Optimizations:** Features Constant Folding (e.g., `(+ 1 (* 2 3))` is optimized to `7` before the VM even sees it).
@@ -21,10 +22,9 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 Clone the repository and install it globally using Cargo:
 
 ```bash
-git clone https://github.com/gabrielpacheco23/haki.git
+git clone [https://github.com/gabrielpacheco23/haki.git](https://github.com/gabrielpacheco23/haki.git)
 cd haki
 cargo install --path .
-
 ```
 
 ### Running Haki
@@ -32,14 +32,12 @@ Launch the interactive REPL:
 
 ```bash
 haki
-
 ```
 
 Or run a script:
 
 ```bash
 haki script.hk
-
 ```
 
 ## 📖 Language Tour
@@ -47,7 +45,7 @@ haki script.hk
 Haki looks and feels like a traditional Lisp, but it packs modern syntactic sugar for handling real-world data.
 
 ### 1. Vectors and HashMaps
-Forget endless `(make-hash)` and `(vector-set!)`. Haki supports native brackets and braces that compile down to fast Rust `Rc<RefCell<T>>` structures.
+Forget endless `(make-hash)` and `(vector-set!)`. Haki supports native brackets and braces that compile down to fast structural data stored directly in the VM's Arena.
 
 ```scheme
 ;; Vector Literal
@@ -63,7 +61,6 @@ Forget endless `(make-hash)` and `(vector-set!)`. Haki supports native brackets 
   })
 
 (displayln (hash-ref player "name")) ;; Output: Zoro
-
 ```
 
 ### 2. Pattern Matching
@@ -76,7 +73,6 @@ Clean up your logic with the built-in `match` macro.
   (("attack" target) (displayln (string-append "Attacking " target)))
   (("equip" item)    (displayln (string-append "Equipped " item)))
   (_                 (displayln "Unknown action")))
-
 ```
 
 ### 3. The Pipe Operator
@@ -92,7 +88,6 @@ Read your functional data transformations from top to bottom, not inside out.
       (fold + 0)))
 
 (displayln sum-of-evens) ;; Output: 120
-
 ```
 
 ### 4. JSON & Web Requests
@@ -100,12 +95,11 @@ Haki is ready for the web. Use the native shell bridge and JSON parser to intera
 
 ```scheme
 ;; Fetch data from an API and parse it natively
-(define raw-response (shell "curl -s https://dummyjson.com/products/1"))
+(define raw-response (shell "curl -s [https://dummyjson.com/products/1](https://dummyjson.com/products/1)"))
 (define product (parse-json raw-response))
 
 (display "Product Name: ")
 (displayln (hash-ref product "title"))
-
 ```
 
 ## 🧠 Architecture
@@ -117,15 +111,15 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 3. **Macro Expander:** A powerful hygienic pass that resolves `defmacro`, translating constructs like `cond`, `let`, `match`, and `|>` into core Lisp expressions.
 4. **Optimizer:** Bottom-up AST traversal to perform Constant Folding.
 5. **Compiler:** Translates the optimized AST into linear Bytecode (`Chunk` of `OpCodes`).
-6. **Virtual Machine (VM):** Executes the instructions using a pre-allocated stack, resolving variables via lexical environments (`Rc<RefCell<Env>>`).
+6. **Virtual Machine (VM) & GC:** Executes instructions using a pre-allocated stack. Memory is strictly managed by a custom flat-array Arena and a Mark-and-Sweep Garbage Collector, keeping the runtime exceptionally fast and memory-safe.
 
 ## 🚧 Future Roadmap (TODOs)
 
 Haki is pretty much functional, but its not yet a full mature programming language. Here are the main goals for the future:
 
-- [ ] **Garbage Collection (GC):** Currently, Haki relies on Rust's `Rc` and `RefCell` for memory management. The next architectural leap is implementing a true tracing Garbage Collector (like Mark-and-Sweep) to resolve circular references and boost performance.
 - [ ] **Expand the Standard Library:** Grow `std` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
 - [ ] **Error Reporting:** Add line numbers, column tracking, and stack traces to make debugging Haki scripts even more developer-friendly.
+- [ ] **NaN Tagging (Optimization):** Optimize the memory footprint of `LispExp` down to 8 bytes by packing pointers and booleans inside the unused bits of an `f64` float.
 
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/gabrielpacheco23/haki/issues).
