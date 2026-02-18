@@ -35,7 +35,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
             match head {
                 LispExp::Symbol(s) if s == "quote" => {
                     if list.len() != 2 {
-                        return Err("quote requer 1 argumento".to_string());
+                        return Err("quote requires 1 argument".to_string());
                     }
                     let runtime_list = vec_to_pairs(&list[1]);
 
@@ -46,7 +46,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                 }
                 LispExp::Symbol(s) if s == "set!" => {
                     if list.len() != 3 {
-                        return Err("set! requer variável e valor".to_string());
+                        return Err("'set!' requires a variable and value".to_string());
                     }
                     match &list[1] {
                         LispExp::Symbol(name) => {
@@ -56,7 +56,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                                 chunk.code.push(OpCode::Return);
                             }
                         }
-                        _ => return Err("'set!' inválido".to_string()),
+                        _ => return Err("Invalid set!".to_string()),
                     }
                 }
                 LispExp::Symbol(s) if s == "define" => match &list[1] {
@@ -93,14 +93,14 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                                 chunk.code.push(OpCode::Return);
                             }
                         } else {
-                            return Err("Nome da função inválido".to_string());
+                            return Err("Invalid procedure name".to_string());
                         }
                     }
-                    _ => return Err("Define inválido".to_string()),
+                    _ => return Err("Invalid define".to_string()),
                 },
                 LispExp::Symbol(s) if aritmethic_operators.contains(&s.as_str()) => {
                     if list.len() < 3 {
-                        return Err(format!("{} requer argumentos", s));
+                        return Err(format!("{} requires arguments", s));
                     }
                     compile(&list[1], chunk, false)?;
 
@@ -122,7 +122,7 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                 LispExp::Symbol(s) if comparison_operators.contains(&s.as_str()) => {
                     let arg_count = list.len() - 1;
                     if arg_count < 2 {
-                        return Err(format!("{} requer pelo menos 2 argumentos", s));
+                        return Err(format!("{} requires at least 2 arguments", s));
                     }
                     for arg in &list[1..] {
                         compile(arg, chunk, false)?;
@@ -143,10 +143,10 @@ pub fn compile(exp: &LispExp, chunk: &mut Chunk, is_tail: bool) -> Result<(), St
                 }
                 LispExp::Symbol(s) if ["car", "cdr", "cons"].contains(&s.as_str()) => {
                     if (s == "car" || s == "cdr") && list.len() != 2 {
-                        return Err(format!("{} requer 1 argumento", s));
+                        return Err(format!("{} requires 1 argument", s));
                     }
                     if s == "cons" && list.len() != 3 {
-                        return Err("cons requer 2 argumentos".to_string());
+                        return Err("'cons' requires 2 arguments".to_string());
                     }
 
                     for arg in &list[1..] {
@@ -244,10 +244,10 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
                 return LispExp::List(vec);
             }
 
-            // 1. Otimiza os argumentos internos primeiro (Recursão Bottom-Up)
+            //  Otimiza os argumentos internos primeiro (Recursão Bottom-Up)
             let optimized_vec: Vec<LispExp> = vec.into_iter().map(optimize_ast).collect();
 
-            // 2. Tenta fazer o "Folding"
+            //  Tenta fazer o "Folding"
             if let LispExp::Symbol(op) = &optimized_vec[0] {
                 // Checa se é um operador matemático puro
                 if ["+", "-", "*", "/"].contains(&op.as_str()) {
@@ -266,7 +266,7 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
                             }
                         });
 
-                        let mut result = args.next().unwrap(); // Pega o 1º argumento
+                        let mut result = args.next().unwrap();
 
                         match op.as_str() {
                             "+" => {
