@@ -1,0 +1,200 @@
+use crate::{
+    apply_macro, apply_procedure,
+    env::{Env, LispEnv},
+    expand_quasiquote,
+    expr::{LispExp, LispLambda},
+    helpers::{env_set, expand_macros, pairs_to_vec},
+};
+use std::rc::Rc;
+
+pub fn eval(exp: LispExp, env: &mut Env) -> Result<LispExp, String> {
+    match exp {
+        LispExp::Symbol(s) => {
+            LispEnv::get(env, &s).ok_or_else(|| format!("Variable not found: '{}'", s))
+        }
+        LispExp::Number(_) | LispExp::Bool(_) | LispExp::Str(_) => Ok(exp),
+        LispExp::Native(_) => Ok(exp),
+        LispExp::Lambda(_) => Ok(exp),
+        LispExp::Macro(_) => Ok(exp),
+        LispExp::List(list) => {
+            let (head, tail) = list.split_first().ok_or("Cannot evaluate empty list '()")?;
+
+            match head {
+                LispExp::Symbol(s) if s == "if" => {
+                    if tail.len() != 3 {
+                        return Err(
+                            "'if' requires 3 arguments: (if condition then else)".to_string()
+                        );
+                    }
+
+                    let test_result = eval(tail[0].clone(), env)?;
+                    match test_result {
+                        LispExp::Bool(false) => eval(tail[2].clone(), env),
+                        _ => eval(tail[1].clone(), env),
+                    }
+                }
+                LispExp::Symbol(s) if s == "begin" => {
+                    let mut last_val = LispExp::List(vec![]);
+
+                    for exp in tail {
+                        last_val = eval(exp.clone(), env)?;
+                    }
+
+                    Ok(last_val)
+                }
+                LispExp::Symbol(s) if s == "define" => {
+                    if tail.len() < 2 {
+                        return Err("'define' requires arguments".to_string());
+                    }
+
+                    let (name, val) = match &tail[0] {
+                        LispExp::Symbol(s) => (s.clone(), eval(tail[1].clone(), env)?),
+                        LispExp::List(def_header) => {
+                            if def_header.is_empty() {
+                                return Err("Invalid procedure definition".to_string());
+                            }
+                            let func_name = match &def_header[0] {
+                                LispExp::Symbol(s) => s.clone(),
+                                _ => return Err("Procedure name must be a symbol".to_string()),
+                            };
+
+                            let params = LispExp::List(def_header[1..].to_vec());
+
+                            let body_exps = &tail[1..];
+                            let body = if body_exps.len() > 1 {
+                                let mut begin_vec = vec![LispExp::Symbol("begin".to_string())];
+                                begin_vec.extend_from_slice(body_exps);
+                                LispExp::List(begin_vec)
+                            } else if body_exps.len() == 1 {
+                                body_exps[0].clone()
+                            } else {
+                                return Err("Procedure without body".to_string());
+                            };
+
+                            let lambda = LispExp::Lambda(LispLambda {
+                                params: Rc::new(params),
+                                body: Rc::new(body),
+                                env: env.clone(),
+                            });
+
+                            (func_name, lambda)
+                        }
+                        _ => return Err("Invalid first argument of 'define'".to_string()),
+                    };
+
+                    env.borrow_mut().data.insert(name, val);
+                    Ok(LispExp::Void)
+                }
+                LispExp::Symbol(s) if s == "lambda" => {
+                    if tail.len() != 2 {
+                        return Err(
+                            "lambda requires 2 arguments: (lambda (params) body)".to_string()
+                        );
+                    }
+
+                    let params = tail[0].clone();
+
+                    let body_exps = &tail[1..];
+                    let body = if body_exps.len() > 1 {
+                        let mut begin_vec = vec![LispExp::Symbol("begin".to_string())];
+                        begin_vec.extend_from_slice(body_exps);
+                        LispExp::List(begin_vec)
+                    } else {
+                        body_exps[0].clone()
+                    };
+
+                    Ok(LispExp::Lambda(LispLambda {
+                        params: Rc::new(params),
+                        body: Rc::new(body),
+                        env: env.clone(),
+                    }))
+                }
+                LispExp::Symbol(s) if s == "defmacro" => {
+                    let head_def = match &tail[0] {
+                        LispExp::List(l) if !l.is_empty() => l,
+                        _ => return Err("defmacro requires (name params...)".to_string()),
+                    };
+
+                    let macro_name = match &head_def[0] {
+                        LispExp::Symbol(s) => s.clone(),
+                        _ => {
+                            return Err("Macro name must be a symbol".to_string());
+                        }
+                    };
+
+                    let params = Rc::new(LispExp::List(head_def[1..].to_vec()));
+                    let body = Rc::new(tail[1].clone());
+
+                    let macro_exp = LispExp::Macro(LispLambda {
+                        params,
+                        body,
+                        env: env.clone(),
+                    });
+
+                    env.borrow_mut().data.insert(macro_name, macro_exp);
+                    Ok(LispExp::Void)
+                }
+                LispExp::Symbol(s) if s == "set!" => {
+                    if tail.len() != 2 {
+                        return Err("set! requires 2 arguments: (set! var val)".to_string());
+                    }
+
+                    let var_name = match &tail[0] {
+                        LispExp::Symbol(s) => s,
+                        _ => {
+                            return Err("First argument of 'set!' must be a symbol".to_string());
+                        }
+                    };
+
+                    let val = eval(tail[1].clone(), env)?;
+                    env_set(env, var_name, val)?;
+
+                    Ok(LispExp::Void)
+                }
+
+                LispExp::Symbol(s) if s == "quote" => {
+                    if tail.len() != 1 {
+                        return Err("'quote' requires 1 argument".to_string());
+                    }
+
+                    Ok(tail[0].clone())
+                }
+                LispExp::Symbol(s) if s == "quasiquote" => {
+                    if tail.len() != 1 {
+                        return Err("'quasiquote' requires 1 argument".to_string());
+                    }
+
+                    expand_quasiquote(&tail[0], env)
+                }
+                _ => {
+                    let proc = eval(head.clone(), env)?;
+
+                    match proc {
+                        LispExp::Macro(macro_def) => {
+                            let expansion = apply_macro(&macro_def, tail, env)?;
+                            eval(expansion, env)
+                        }
+
+                        _ => {
+                            let args: Result<Vec<LispExp>, String> =
+                                tail.iter().map(|arg| eval(arg.clone(), env)).collect();
+
+                            apply_procedure(&proc, &args?, env)
+                        }
+                    }
+                }
+            }
+        }
+        LispExp::VmClosure { .. } => todo!(),
+        LispExp::Void => Ok(LispExp::Void),
+        LispExp::Pair(_, _) => {
+            let ast_list = pairs_to_vec(&exp);
+            let expanded_ast = expand_macros(ast_list, env)?;
+
+            eval(expanded_ast, env)
+        }
+        LispExp::Nil => Ok(LispExp::List(vec![])),
+        LispExp::Vector(_v) => todo!(),
+        LispExp::HashMap(_map) => todo!(),
+    }
+}
