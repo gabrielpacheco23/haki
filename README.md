@@ -6,10 +6,10 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 
 ## ✨ Key Features
 
-* **Bytecode Virtual Machine:** Code is compiled into optimized OpCodes and executed on a fast, stack-based VM.
+* **Bytecode Virtual Machine:** Code is compiled into optimized OpCodes and executed on a stack-based VM.
 * **Tail Call Optimization (TCO):** Write infinite recursive loops without ever blowing up the call stack. Memory stays at O(1).
 * **Compile-Time Optimizations:** Features Constant Folding (e.g., `(+ 1 (* 2 3))` is optimized to `7` before the VM even sees it).
-* **Modern Data Literals:** Native support for contiguous Vectors `[]` and HashMaps `{}` straight in the parser, making data manipulation a breeze.
+* **Data Literals:** Native support for contiguous Vectors `[]` and HashMaps `{}` straight in the parser, making data manipulation a breeze.
 * **Pattern Matching:** A powerful `match` macro for elegant control flow and variable binding.
 * **The Pipe Operator (`|>`):** Thread data through multiple functions sequentially, avoiding the dreaded "Lisp parenthesis pyramid".
 * **Native JSON Support:** Integration with Rust's `serde_json` to parse internet payloads directly into Lisp AST structures.
@@ -124,7 +124,7 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 Haki is pretty much functional, but its not yet a full mature programming language. Here are the main goals for the future:
 
 - [ ] **Garbage Collection (GC):** Currently, Haki relies on Rust's `Rc` and `RefCell` for memory management. The next architectural leap is implementing a true tracing Garbage Collector (like Mark-and-Sweep) to resolve circular references and boost performance.
-- [ ] **Expand the Standard Library:** Grow `stdlib.hk` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
+- [ ] **Expand the Standard Library:** Grow `std` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
 - [ ] **Error Reporting:** Add line numbers, column tracking, and stack traces to make debugging Haki scripts even more developer-friendly.
 
 ## 🤝 Contributing
