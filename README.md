@@ -22,7 +22,7 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 Clone the repository and install it globally using Cargo:
 
 ```bash
-git clone [https://github.com/gabrielpacheco23/haki.git](https://github.com/gabrielpacheco23/haki.git)
+git clone https://github.com/gabrielpacheco23/haki.git
 cd haki
 cargo install --path .
 ```
