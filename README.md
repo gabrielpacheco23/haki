@@ -1,6 +1,6 @@
 # Haki ⚓
 
-**Haki** is a fast, embeddable, and modern Lisp dialect written entirely in Rust. 
+**Haki** is a fast, embeddable, and lightweight Lisp dialect written entirely in Rust. 
 
 Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "toy project" to explore compiler design and Virtual Machines, and has since evolved into a robust engine. It marries the elegant minimalism of Scheme with the pragmatic, data-driven features of modern scripting languages like Clojure and JavaScript. It is designed to be a powerful general-purpose scripting language and a lightweight embedded rules engine.
 
