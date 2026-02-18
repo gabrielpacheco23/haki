@@ -121,7 +121,7 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 
 ## 🚧 Future Roadmap (TODOs)
 
-Haki is fully functional, but the journey of a programming language never truly ends. Here are the main goals for the future:
+Haki is pretty much functional, but its not yet a full mature programming language. Here are the main goals for the future:
 
 - [ ] **Garbage Collection (GC):** Currently, Haki relies on Rust's `Rc` and `RefCell` for memory management. The next architectural leap is implementing a true tracing Garbage Collector (like Mark-and-Sweep) to resolve circular references and boost performance.
 - [ ] **Expand the Standard Library:** Grow `stdlib.hk` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
