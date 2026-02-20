@@ -13,53 +13,66 @@ pub fn compile(
     chunk: &mut Chunk,
     is_tail: bool,
     heap: &mut Heap,
+    previous_line: usize,
 ) -> Result<(), String> {
     let aritmethic_operators = ["+", "-", "*", "/"];
     let comparison_operators = ["<", ">", "=", "<=", ">="];
 
+    let current_line = match exp {
+        LispExp::List(_, l) if *l != 0 => *l,
+        LispExp::Symbol(_, l) if *l != 0 => *l,
+        _ => previous_line,
+    };
+
     match exp {
         LispExp::Symbol(s, _) => {
-            chunk.code.push(OpCode::GetVar(s.clone()));
+            chunk.write(OpCode::GetVar(s.clone()), current_line);
             if is_tail {
-                chunk.code.push(OpCode::Return);
+                chunk.write(OpCode::Return, current_line);
             }
         }
         LispExp::Number(n) => {
             let val = Value::number(*n);
             let idx = chunk.add_constant(val);
-            chunk.code.push(OpCode::Constant(idx));
+            chunk.write(OpCode::Constant(idx), current_line);
             if is_tail {
-                chunk.code.push(OpCode::Return);
+                chunk.write(OpCode::Return, current_line);
             }
         }
         LispExp::Bool(b) => {
             let val = Value::boolean(*b);
             let idx = chunk.add_constant(val);
-            chunk.code.push(OpCode::Constant(idx));
+            chunk.write(OpCode::Constant(idx), current_line);
             if is_tail {
-                chunk.code.push(OpCode::Return);
+                chunk.write(OpCode::Return, current_line);
             }
         }
         LispExp::Str(s) => {
             let val = heap.alloc_string(s.clone());
             let idx = chunk.add_constant(val);
-            chunk.code.push(OpCode::Constant(idx));
+            chunk.write(OpCode::Constant(idx), current_line);
 
             if is_tail {
-                chunk.code.push(OpCode::Return);
+                chunk.write(OpCode::Return, current_line);
             }
         }
         LispExp::Void => {
             let idx = chunk.add_constant(Value::void());
-            chunk.code.push(OpCode::Constant(idx));
+            chunk.write(OpCode::Constant(idx), current_line);
 
             if is_tail {
-                chunk.code.push(OpCode::Return);
+                chunk.write(OpCode::Return, current_line);
             }
         }
         LispExp::Pair(_, _) => {
             let ast_vec = pairs_to_vec(exp, heap);
-            compile(&LispExp::List(vec![ast_vec], 0), chunk, is_tail, heap)?
+            compile(
+                &LispExp::List(vec![ast_vec], current_line),
+                chunk,
+                is_tail,
+                heap,
+                current_line,
+            )?
         }
         LispExp::List(list, _) => {
             if list.is_empty() {
@@ -74,9 +87,9 @@ pub fn compile(
                     let runtime_list = vec_to_pairs(&list[1], heap);
 
                     let idx = chunk.add_constant(runtime_list);
-                    chunk.code.push(OpCode::Constant(idx));
+                    chunk.write(OpCode::Constant(idx), current_line);
                     if is_tail {
-                        chunk.code.push(OpCode::Return);
+                        chunk.write(OpCode::Return, current_line);
                     }
                 }
                 LispExp::Symbol(s, _) if s == "set!" => {
@@ -85,10 +98,10 @@ pub fn compile(
                     }
                     match &list[1] {
                         LispExp::Symbol(name, _) => {
-                            compile(&list[2], chunk, false, heap)?;
-                            chunk.code.push(OpCode::SetVar(name.clone()));
+                            compile(&list[2], chunk, false, heap, current_line)?;
+                            chunk.write(OpCode::SetVar(name.clone()), current_line);
                             if is_tail {
-                                chunk.code.push(OpCode::Return);
+                                chunk.write(OpCode::Return, current_line);
                             }
                         }
                         _ => return Err("Invalid set!".to_string()),
@@ -96,10 +109,10 @@ pub fn compile(
                 }
                 LispExp::Symbol(s, _) if s == "define" => match &list[1] {
                     LispExp::Symbol(name, _) => {
-                        compile(&list[2], chunk, false, heap)?;
-                        chunk.code.push(OpCode::DefVar(name.clone()));
+                        compile(&list[2], chunk, false, heap, current_line)?;
+                        chunk.write(OpCode::DefVar(name.clone()), current_line);
                         if is_tail {
-                            chunk.code.push(OpCode::Return);
+                            chunk.write(OpCode::Return, current_line);
                         }
                     }
                     LispExp::List(header, _) if !header.is_empty() => {
@@ -114,18 +127,18 @@ pub fn compile(
                             let mut closure_chunk = Chunk::new();
                             for (i, body_exp) in list[2..].iter().enumerate() {
                                 let last = i == (list.len() - 3);
-                                compile(body_exp, &mut closure_chunk, last, heap)?;
+                                compile(body_exp, &mut closure_chunk, last, heap, current_line)?;
                                 if !last {
-                                    closure_chunk.code.push(OpCode::Pop);
+                                    closure_chunk.write(OpCode::Pop, current_line);
                                 }
                             }
 
                             chunk
                                 .code
                                 .push(OpCode::MakeClosure(params, Rc::new(closure_chunk)));
-                            chunk.code.push(OpCode::DefVar(name.clone()));
+                            chunk.write(OpCode::DefVar(name.clone()), current_line);
                             if is_tail {
-                                chunk.code.push(OpCode::Return);
+                                chunk.write(OpCode::Return, current_line);
                             }
                         } else {
                             return Err("Invalid procedure name".to_string());
@@ -137,21 +150,21 @@ pub fn compile(
                     if list.len() < 3 {
                         return Err(format!("{} requires arguments", s));
                     }
-                    compile(&list[1], chunk, false, heap)?;
+                    compile(&list[1], chunk, false, heap, current_line)?;
 
                     for arg in &list[2..] {
-                        compile(arg, chunk, false, heap)?;
+                        compile(arg, chunk, false, heap, current_line)?;
 
                         match s.as_str() {
-                            "+" => chunk.code.push(OpCode::Add),
-                            "-" => chunk.code.push(OpCode::Sub),
-                            "*" => chunk.code.push(OpCode::Mul),
-                            "/" => chunk.code.push(OpCode::Div),
+                            "+" => chunk.write(OpCode::Add, current_line),
+                            "-" => chunk.write(OpCode::Sub, current_line),
+                            "*" => chunk.write(OpCode::Mul, current_line),
+                            "/" => chunk.write(OpCode::Div, current_line),
                             _ => {}
                         }
                     }
                     if is_tail {
-                        chunk.code.push(OpCode::Return);
+                        chunk.write(OpCode::Return, current_line);
                     }
                 }
                 LispExp::Symbol(s, _) if comparison_operators.contains(&s.as_str()) => {
@@ -160,20 +173,20 @@ pub fn compile(
                         return Err(format!("{} requires at least 2 arguments", s));
                     }
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap)?;
+                        compile(arg, chunk, false, heap, current_line)?;
                     }
 
                     match s.as_str() {
-                        "=" => chunk.code.push(OpCode::Eq(arg_count)),
-                        "<" => chunk.code.push(OpCode::Lt(arg_count)),
-                        ">" => chunk.code.push(OpCode::Gt(arg_count)),
-                        "<=" => chunk.code.push(OpCode::Le(arg_count)),
-                        ">=" => chunk.code.push(OpCode::Ge(arg_count)),
+                        "=" => chunk.write(OpCode::Eq(arg_count), current_line),
+                        "<" => chunk.write(OpCode::Lt(arg_count), current_line),
+                        ">" => chunk.write(OpCode::Gt(arg_count), current_line),
+                        "<=" => chunk.write(OpCode::Le(arg_count), current_line),
+                        ">=" => chunk.write(OpCode::Ge(arg_count), current_line),
                         _ => {}
                     }
 
                     if is_tail {
-                        chunk.code.push(OpCode::Return);
+                        chunk.write(OpCode::Return, current_line);
                     }
                 }
                 LispExp::Symbol(s, _) if ["car", "cdr", "cons"].contains(&s.as_str()) => {
@@ -185,41 +198,41 @@ pub fn compile(
                     }
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap)?;
+                        compile(arg, chunk, false, heap, current_line)?;
                     }
 
                     match s.as_str() {
-                        "cons" => chunk.code.push(OpCode::Cons),
-                        "car" => chunk.code.push(OpCode::Car),
-                        "cdr" => chunk.code.push(OpCode::Cdr),
+                        "cons" => chunk.write(OpCode::Cons, current_line),
+                        "car" => chunk.write(OpCode::Car, current_line),
+                        "cdr" => chunk.write(OpCode::Cdr, current_line),
                         _ => {}
                     }
 
                     if is_tail {
-                        chunk.code.push(OpCode::Return);
+                        chunk.write(OpCode::Return, current_line);
                     }
                 }
                 LispExp::Symbol(s, _) if s == "if" => {
-                    compile(&list[1], chunk, false, heap)?; // condition
+                    compile(&list[1], chunk, false, heap, current_line)?; // condition
 
                     let jump_if_false_idx = chunk.code.len();
-                    chunk.code.push(OpCode::JumpIfFalse(0));
+                    chunk.write(OpCode::JumpIfFalse(0), current_line);
 
-                    compile(&list[2], chunk, is_tail, heap)?; // then
+                    compile(&list[2], chunk, is_tail, heap, current_line)?; // then
 
                     let jump_idx = chunk.code.len();
                     if !is_tail {
-                        chunk.code.push(OpCode::Jump(0));
+                        chunk.write(OpCode::Jump(0), current_line);
                     }
 
                     // patch jumps
                     chunk.code[jump_if_false_idx] = OpCode::JumpIfFalse(chunk.code.len());
 
                     if list.len() > 3 {
-                        compile(&list[3], chunk, is_tail, heap)?;
+                        compile(&list[3], chunk, is_tail, heap, current_line)?;
                     } else if !is_tail {
                         let idx = chunk.add_constant(Value::void());
-                        chunk.code.push(OpCode::Constant(idx));
+                        chunk.write(OpCode::Constant(idx), current_line);
                     }
                     if !is_tail {
                         chunk.code[jump_idx] = OpCode::Jump(chunk.code.len());
@@ -238,9 +251,9 @@ pub fn compile(
                     // Compila body. Apenas ultima exp é is_tail
                     for (i, body_exp) in list[2..].iter().enumerate() {
                         let last = i == (list.len() - 3);
-                        compile(body_exp, &mut closure_chunk, last, heap)?;
+                        compile(body_exp, &mut closure_chunk, last, heap, current_line)?;
                         if !last {
-                            closure_chunk.code.push(OpCode::Pop);
+                            closure_chunk.write(OpCode::Pop, current_line);
                         }
                     }
 
@@ -249,20 +262,20 @@ pub fn compile(
                         .push(OpCode::MakeClosure(params, Rc::new(closure_chunk)));
 
                     if is_tail {
-                        chunk.code.push(OpCode::Return);
+                        chunk.write(OpCode::Return, current_line);
                     }
                 }
                 _ => {
-                    compile(head, chunk, false, heap)?;
+                    compile(head, chunk, false, heap, current_line)?;
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap)?;
+                        compile(arg, chunk, false, heap, current_line)?;
                     }
 
                     if is_tail {
-                        chunk.code.push(OpCode::TailCall(list.len() - 1));
+                        chunk.write(OpCode::TailCall(list.len() - 1), current_line);
                     } else {
-                        chunk.code.push(OpCode::Call(list.len() - 1));
+                        chunk.write(OpCode::Call(list.len() - 1), current_line);
                     }
                 }
             }
@@ -274,15 +287,21 @@ pub fn compile(
 }
 
 pub fn optimize_ast(ast: LispExp) -> LispExp {
+    let line = match &ast {
+        LispExp::List(_, l) => *l,
+        LispExp::Symbol(_, l) => *l,
+        _ => 0,
+    };
+
     match ast {
         LispExp::List(vec, _) => {
             if vec.is_empty() {
-                return LispExp::List(vec, 0);
+                return LispExp::List(vec, line);
             }
 
             if let LispExp::Symbol(s, _) = &vec[0] {
                 if s == "quote" {
-                    return LispExp::List(vec, 0);
+                    return LispExp::List(vec, line);
                 }
             }
 
@@ -344,7 +363,7 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
                 }
             }
 
-            LispExp::List(optimized_vec, 0)
+            LispExp::List(optimized_vec, line)
         }
 
         _ => ast,

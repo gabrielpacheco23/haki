@@ -52,6 +52,11 @@ impl Chunk {
         }
     }
 
+    pub fn write(&mut self, opcode: OpCode, line: usize) {
+        self.code.push(opcode);
+        self.lines.push(line);
+    }
+
     pub fn add_constant(&mut self, value: Value) -> usize {
         self.constants.push(value);
         self.constants.len() - 1
@@ -127,6 +132,34 @@ impl Vm {
     }
 
     pub fn execute(
+        &mut self,
+        chunk: Rc<Chunk>,
+        env: Env,
+        heap: &mut Heap,
+    ) -> Result<Value, String> {
+        match self.execute_inner(chunk, env, heap) {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                let mut trace = format!("\n[ERROR] {}\n", err);
+                trace.push_str("Stack trace:\n");
+
+                for frame in self.frames.iter().rev() {
+                    let ip = if frame.ip > 0 { frame.ip - 1 } else { 0 };
+                    let line = frame.chunk.lines.get(ip).unwrap_or(&0);
+
+                    if *line == 0 {
+                        trace.push_str(&format!(" in <internal> (ip: {})\n", ip));
+                    } else {
+                        trace.push_str(&format!(" in line {} (ip: {})\n", line, ip));
+                    }
+                }
+                self.frames.clear();
+                Err(trace)
+            }
+        }
+    }
+
+    fn execute_inner(
         &mut self,
         chunk: Rc<Chunk>,
         env: Env,
@@ -229,9 +262,10 @@ impl Vm {
                                 let frame = self.frames.last_mut().unwrap();
                                 frame.ip = 0;
                                 frame.env = new_env;
+                                frame.chunk = chunk.clone();
                             } else {
                                 self.frames.push(CallFrame {
-                                    chunk,
+                                    chunk: chunk.clone(),
                                     ip: 0,
                                     env: new_env,
                                 });

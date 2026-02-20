@@ -95,7 +95,7 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
                                 );
                             }
                         }
-                        Err(e) => eprintln!("{} {}", "Error:".bold().red(), e.red()),
+                        Err(e) => eprintln!("{} {}", "".bold().red(), e.red()),
                     }
 
                     buffer.clear();

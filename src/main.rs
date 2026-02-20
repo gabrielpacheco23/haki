@@ -72,8 +72,9 @@ pub fn run_source(
         if optimized_ast != LispExp::Void {
             let mut chunk = Chunk::new();
 
-            compile(&optimized_ast, &mut chunk, false, heap)?;
-            chunk.code.push(OpCode::Return);
+            compile(&optimized_ast, &mut chunk, false, heap, 1)?;
+            // chunk.code.push(OpCode::Return);
+            chunk.write(OpCode::Return, 1);
 
             if mode == ExecMode::Dump {
                 disassemble_chunk(&chunk, "Block", &heap);

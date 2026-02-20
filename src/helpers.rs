@@ -265,17 +265,33 @@ pub fn expand_quasiquote(exp: &LispExp, env: &mut Env, heap: &mut Heap) -> Resul
         LispExp::List(l, _) if l.len() == 2 && is_symbol(&l[0], "unquote") => {
             eval(l[1].clone(), env, heap)
         }
-        LispExp::List(l, _) => {
+        LispExp::List(l, line) => {
             let mut new_list = vec![];
             for item in l {
                 new_list.push(expand_quasiquote(item, env, heap)?);
             }
-
-            Ok(LispExp::List(new_list, 0))
+            Ok(LispExp::List(new_list, *line))
         }
         _ => Ok(exp.clone()),
     }
 }
+
+// pub fn expand_quasiquote(exp: &LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
+//     match exp {
+//         LispExp::List(l, _) if l.len() == 2 && is_symbol(&l[0], "unquote") => {
+//             eval(l[1].clone(), env, heap)
+//         }
+//         LispExp::List(l, _) => {
+//             let mut new_list = vec![];
+//             for item in l {
+//                 new_list.push(expand_quasiquote(item, env, heap)?);
+//             }
+
+//             Ok(LispExp::List(new_list, 0))
+//         }
+//         _ => Ok(exp.clone()),
+//     }
+// }
 
 fn is_symbol(exp: &LispExp, name: &str) -> bool {
     matches!(exp, LispExp::Symbol(s, _) if s == name)
@@ -285,18 +301,18 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
     let ast = pairs_to_vec(&ast, heap);
 
     match ast {
-        LispExp::List(list, _) => {
+        LispExp::List(list, line) => {
             if list.is_empty() {
-                return Ok(LispExp::List(list, 0));
+                return Ok(LispExp::List(list, line));
             }
 
             if let LispExp::Symbol(s, _) = &list[0] {
                 if s == "defmacro" {
-                    eval(LispExp::List(list.clone(), 0), env, heap)?;
+                    eval(LispExp::List(list.clone(), line), env, heap)?;
                     return Ok(LispExp::Void);
                 }
                 if s == "quote" {
-                    return Ok(LispExp::List(list.clone(), 0));
+                    return Ok(LispExp::List(list.clone(), line));
                 }
                 if s == "lambda" {
                     if list.len() < 3 {
@@ -306,7 +322,7 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
                     for item in &list[2..] {
                         new_list.push(expand_macros(item.clone(), env, heap)?);
                     }
-                    return Ok(LispExp::List(new_list, 0));
+                    return Ok(LispExp::List(new_list, line));
                 }
                 if s == "define" {
                     if list.len() < 3 {
@@ -316,12 +332,19 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
                     for item in &list[2..] {
                         new_list.push(expand_macros(item.clone(), env, heap)?);
                     }
-                    return Ok(LispExp::List(new_list, 0));
+                    return Ok(LispExp::List(new_list, line));
                 }
 
                 if let Some(macro_def) = find_macro(env, s, heap) {
                     let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
-                    return expand_macros(expanded_ast, env, heap);
+                    let mut fully_expanded = expand_macros(expanded_ast, env, heap)?;
+
+                    if let LispExp::List(_, ref mut expanded_line) = fully_expanded {
+                        if *expanded_line == 0 {
+                            *expanded_line = line;
+                        }
+                    }
+                    return Ok(fully_expanded);
                 }
             }
 
@@ -329,11 +352,65 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
             for item in list {
                 new_list.push(expand_macros(item, env, heap)?);
             }
-            Ok(LispExp::List(new_list, 0))
+            Ok(LispExp::List(new_list, line))
         }
         _ => Ok(ast),
     }
 }
+
+// pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
+//     let ast = pairs_to_vec(&ast, heap);
+
+//     match ast {
+//         LispExp::List(list, _) => {
+//             if list.is_empty() {
+//                 return Ok(LispExp::List(list, 0));
+//             }
+
+//             if let LispExp::Symbol(s, _) = &list[0] {
+//                 if s == "defmacro" {
+//                     eval(LispExp::List(list.clone(), 0), env, heap)?;
+//                     return Ok(LispExp::Void);
+//                 }
+//                 if s == "quote" {
+//                     return Ok(LispExp::List(list.clone(), 0));
+//                 }
+//                 if s == "lambda" {
+//                     if list.len() < 3 {
+//                         return Err("Malformed lambda".to_string());
+//                     }
+//                     let mut new_list = vec![list[0].clone(), list[1].clone()];
+//                     for item in &list[2..] {
+//                         new_list.push(expand_macros(item.clone(), env, heap)?);
+//                     }
+//                     return Ok(LispExp::List(new_list, 0));
+//                 }
+//                 if s == "define" {
+//                     if list.len() < 3 {
+//                         return Err("Malformed define".to_string());
+//                     }
+//                     let mut new_list = vec![list[0].clone(), list[1].clone()];
+//                     for item in &list[2..] {
+//                         new_list.push(expand_macros(item.clone(), env, heap)?);
+//                     }
+//                     return Ok(LispExp::List(new_list, 0));
+//                 }
+
+//                 if let Some(macro_def) = find_macro(env, s, heap) {
+//                     let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
+//                     return expand_macros(expanded_ast, env, heap);
+//                 }
+//             }
+
+//             let mut new_list = vec![];
+//             for item in list {
+//                 new_list.push(expand_macros(item, env, heap)?);
+//             }
+//             Ok(LispExp::List(new_list, 0))
+//         }
+//         _ => Ok(ast),
+//     }
+// }
 
 fn find_macro(env: &Env, name: &str, heap: &Heap) -> Option<LispLambda> {
     let env_ref = env.borrow();
@@ -356,35 +433,76 @@ pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
     match exp {
         LispExp::Pair(car_val, cdr_val) => {
             let mut vec = vec![];
-            vec.push(value_to_ast(*car_val, heap));
+
+            let car_ast = value_to_ast(*car_val, heap);
+            vec.push(pairs_to_vec(&car_ast, heap));
 
             let mut current = *cdr_val;
             while !current.is_nil() {
                 if current.is_gc_ref() {
                     match heap.get(current) {
                         Some(LispExp::Pair(next_car, next_cdr)) => {
-                            vec.push(value_to_ast(*next_car, heap));
+                            let next_car_ast = value_to_ast(*next_car, heap);
+                            vec.push(pairs_to_vec(&next_car_ast, heap));
                             current = *next_cdr;
                             continue;
                         }
                         Some(LispExp::List(l, _)) => {
                             for item in l {
-                                vec.push(item.clone());
+                                vec.push(pairs_to_vec(item, heap));
                             }
                             break;
                         }
                         _ => {}
                     }
                 }
-                vec.push(value_to_ast(current, heap));
+                let curr_ast = value_to_ast(current, heap);
+                vec.push(pairs_to_vec(&curr_ast, heap));
                 break;
             }
             LispExp::List(vec, 0)
         }
-        LispExp::List(_, _) => exp.clone(),
+        LispExp::List(vec, line) => {
+            let new_vec = vec.iter().map(|item| pairs_to_vec(item, heap)).collect();
+            LispExp::List(new_vec, *line)
+        }
         _ => exp.clone(),
     }
 }
+
+// pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
+//     match exp {
+//         LispExp::Pair(car_val, cdr_val) => {
+//             let mut vec = vec![];
+//             vec.push(value_to_ast(*car_val, heap));
+
+//             let mut current = *cdr_val;
+//             while !current.is_nil() {
+//                 if current.is_gc_ref() {
+//                     match heap.get(current) {
+//                         Some(LispExp::Pair(next_car, next_cdr)) => {
+//                             vec.push(value_to_ast(*next_car, heap));
+//                             current = *next_cdr;
+//                             continue;
+//                         }
+//                         Some(LispExp::List(l, _)) => {
+//                             for item in l {
+//                                 vec.push(item.clone());
+//                             }
+//                             break;
+//                         }
+//                         _ => {}
+//                     }
+//                 }
+//                 vec.push(value_to_ast(current, heap));
+//                 break;
+//             }
+//             LispExp::List(vec, 0)
+//         }
+//         LispExp::List(_, _) => exp.clone(),
+//         _ => exp.clone(),
+//     }
+// }
 
 pub fn vec_to_pairs(exp: &LispExp, heap: &mut Heap) -> Value {
     match exp {

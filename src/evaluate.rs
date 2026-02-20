@@ -9,6 +9,12 @@ use crate::{
 use std::rc::Rc;
 
 pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
+    // let line = match &exp {
+    //     LispExp::Symbol(_, l) => *l,
+    //     LispExp::List(_, l) => *l,
+    //     _ => 0,
+    // };
+
     match exp {
         LispExp::Symbol(s, _) => {
             let val = env
@@ -38,8 +44,8 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         _ => eval(tail[1].clone(), env, heap),
                     }
                 }
-                LispExp::Symbol(s, _) if s == "begin" => {
-                    let mut last_val = LispExp::List(vec![], 0);
+                LispExp::Symbol(s, line) if s == "begin" => {
+                    let mut last_val = LispExp::List(vec![], *line);
 
                     for exp in tail {
                         last_val = eval(exp.clone(), env, heap)?;
@@ -47,7 +53,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     Ok(last_val)
                 }
-                LispExp::Symbol(s, _) if s == "define" => {
+                LispExp::Symbol(s, line) if s == "define" => {
                     if tail.len() < 2 {
                         return Err("'define' requires arguments".to_string());
                     }
@@ -63,11 +69,12 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                                 _ => return Err("Procedure name must be a symbol".to_string()),
                             };
 
-                            let params = LispExp::List(def_header[1..].to_vec(), 0);
+                            let params = LispExp::List(def_header[1..].to_vec(), *line);
 
                             let body_exps = &tail[1..];
                             let body = if body_exps.len() > 1 {
-                                let mut begin_vec = vec![LispExp::Symbol("begin".to_string(), 0)];
+                                let mut begin_vec =
+                                    vec![LispExp::Symbol("begin".to_string(), *line)];
                                 begin_vec.extend_from_slice(body_exps);
                                 LispExp::List(begin_vec, 0)
                             } else if body_exps.len() == 1 {
@@ -91,7 +98,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                     env.borrow_mut().insert(name, value_tag);
                     Ok(LispExp::Void)
                 }
-                LispExp::Symbol(s, _) if s == "lambda" => {
+                LispExp::Symbol(s, line) if s == "lambda" => {
                     if tail.len() != 2 {
                         return Err(
                             "lambda requires 2 arguments: (lambda (params) body)".to_string()
@@ -102,7 +109,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     let body_exps = &tail[1..];
                     let body = if body_exps.len() > 1 {
-                        let mut begin_vec = vec![LispExp::Symbol("begin".to_string(), 0)];
+                        let mut begin_vec = vec![LispExp::Symbol("begin".to_string(), *line)];
                         begin_vec.extend_from_slice(body_exps);
                         LispExp::List(begin_vec, 0)
                     } else {
@@ -115,7 +122,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         env: env.clone(),
                     }))
                 }
-                LispExp::Symbol(s, _) if s == "defmacro" => {
+                LispExp::Symbol(s, line) if s == "defmacro" => {
                     let head_def = match &tail[0] {
                         LispExp::List(l, _) if !l.is_empty() => l,
                         _ => return Err("defmacro requires (name params...)".to_string()),
@@ -128,7 +135,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         }
                     };
 
-                    let params = Rc::new(LispExp::List(head_def[1..].to_vec(), 0));
+                    let params = Rc::new(LispExp::List(head_def[1..].to_vec(), *line));
                     let body = Rc::new(tail[1].clone());
 
                     let macro_exp = LispExp::Macro(LispLambda {
@@ -196,6 +203,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
             }
         }
         LispExp::Void => Ok(LispExp::Void),
+        // TODO: check this
         LispExp::Nil => Ok(LispExp::List(vec![], 0)),
         LispExp::Pair(_, _) => {
             let ast_list = pairs_to_vec(&exp, heap);
