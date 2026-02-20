@@ -118,7 +118,7 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 Haki is pretty much functional, but its not yet a full mature programming language. Here are the main goals for the future:
 
 - [ ] **Expand the Standard Library:** Grow `std` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
-- [ ] **Error Reporting:** Add line numbers, column tracking, and stack traces to make debugging Haki scripts even more developer-friendly.
+- [x] **Error Reporting:** Add line numbers, column tracking, and stack traces to make debugging Haki scripts even more developer-friendly.
 - [x] **NaN Tagging (Optimization):** Optimize the memory footprint of `LispExp` down to 8 bytes by packing pointers and booleans inside the unused bits of an `f64` float.
 
 ## 🤝 Contributing
