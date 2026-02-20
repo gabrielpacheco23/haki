@@ -1,5 +1,6 @@
 use crate::env::Env;
 use crate::heap::Heap;
+use crate::helpers::ast_to_value;
 use crate::value::Value;
 use crate::vm::Chunk;
 
@@ -40,6 +41,98 @@ pub enum LispExp {
 
 use std::rc::Rc;
 
+// ==========================================
+// 1. O FORMATADOR DA ÁRVORE (Entende `&LispExp`)
+// ==========================================
+pub struct AstFmt<'a> {
+    pub exp: &'a LispExp,
+    pub heap: &'a Heap,
+}
+
+impl<'a> std::fmt::Display for AstFmt<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.exp {
+            LispExp::Number(n) => write!(f, "{}", n),
+            LispExp::Str(s) => write!(f, "{}", s),
+            LispExp::Symbol(s) => write!(f, "{}", s),
+            LispExp::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
+            LispExp::Nil => write!(f, "()"),
+            LispExp::Void => write!(f, ""),
+            LispExp::Native(_) | LispExp::Lambda(_) | LispExp::VmClosure { .. } => {
+                write!(f, "<procedure>")
+            }
+
+            LispExp::List(vec) => {
+                write!(f, "(")?;
+                for (i, item) in vec.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(
+                        f,
+                        "{}",
+                        AstFmt {
+                            exp: item,
+                            heap: self.heap
+                        }
+                    )?;
+                }
+                write!(f, ")")
+            }
+
+            LispExp::Pair(car, cdr) => {
+                write!(f, "(")?;
+                write!(f, "{}", lisp_fmt(*car, self.heap))?;
+
+                let mut current = *cdr;
+                loop {
+                    if current.is_nil() {
+                        write!(f, ")")?;
+                        break;
+                    }
+                    if !current.is_gc_ref() {
+                        write!(f, " . {}", lisp_fmt(current, self.heap))?;
+                        write!(f, ")")?;
+                        break;
+                    }
+                    if let Some(LispExp::Pair(next_car, next_cdr)) = self.heap.get(current) {
+                        write!(f, " {}", lisp_fmt(*next_car, self.heap))?;
+                        current = *next_cdr;
+                    } else {
+                        write!(f, " . {}", lisp_fmt(current, self.heap))?;
+                        write!(f, ")")?;
+                        break;
+                    }
+                }
+                Ok(())
+            }
+
+            LispExp::Vector(vec) => {
+                write!(f, "[")?;
+                for (i, item) in vec.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", lisp_fmt(*item, self.heap))?;
+                }
+                write!(f, "]")
+            }
+
+            LispExp::HashMap(map) => {
+                write!(f, "{{ ")?;
+                for (i, (k, val)) in map.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "\"{}\": {}", k, lisp_fmt(*val, self.heap))?;
+                }
+                write!(f, " }}")
+            }
+            _ => write!(f, "<unknown>"),
+        }
+    }
+}
+
 pub struct LispFmt<'a> {
     pub val: Value,
     pub heap: &'a Heap,
@@ -52,7 +145,6 @@ pub fn lisp_fmt<'a>(val: Value, heap: &'a Heap) -> LispFmt<'a> {
 impl<'a> std::fmt::Display for LispFmt<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let v = self.val;
-
         if v.is_number() {
             write!(f, "{}", v.as_number())
         } else if v.is_boolean() {
@@ -63,66 +155,17 @@ impl<'a> std::fmt::Display for LispFmt<'a> {
             write!(f, "")
         } else if v.is_gc_ref() {
             if let Some(exp) = self.heap.get(v) {
-                match exp {
-                    LispExp::Str(s) => write!(f, "{}", s),
-                    LispExp::Symbol(s) => write!(f, "{}", s),
-                    LispExp::Native(_) | LispExp::Lambda(_) | LispExp::VmClosure { .. } => {
-                        write!(f, "<procedure>")
+                // A MÁGICA 3: Desempacotou do Galpão? Repassa pro AstFmt imprimir!
+                write!(
+                    f,
+                    "{}",
+                    AstFmt {
+                        exp,
+                        heap: self.heap
                     }
-
-                    LispExp::Pair(car, cdr) => {
-                        write!(f, "(")?;
-                        write!(f, "{}", lisp_fmt(*car, self.heap))?;
-                        let mut current = *cdr;
-                        loop {
-                            if current.is_nil() {
-                                write!(f, ")")?;
-                                break;
-                            }
-                            if !current.is_gc_ref() {
-                                write!(f, " . {}", lisp_fmt(current, self.heap))?;
-                                write!(f, ")")?;
-                                break;
-                            }
-
-                            if let Some(LispExp::Pair(next_car, next_cdr)) = self.heap.get(current)
-                            {
-                                write!(f, " {}", lisp_fmt(*next_car, self.heap))?;
-                                current = *next_cdr;
-                            } else {
-                                write!(f, " . {}", lisp_fmt(current, self.heap))?;
-                                write!(f, ")")?;
-                                break;
-                            }
-                        }
-                        Ok(())
-                    }
-
-                    LispExp::Vector(vec) => {
-                        write!(f, "[")?;
-                        for (i, item) in vec.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, " ")?;
-                            }
-                            write!(f, "{}", lisp_fmt(*item, self.heap))?;
-                        }
-                        write!(f, "]")
-                    }
-
-                    LispExp::HashMap(map) => {
-                        write!(f, "{{ ")?;
-                        for (i, (k, val)) in map.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "\"{}\": {}", k, lisp_fmt(*val, self.heap))?;
-                        }
-                        write!(f, " }}")
-                    }
-                    _ => write!(f, "<unknown>"),
-                }
+                )
             } else {
-                write!(f, "<nil>") // invalid pointer
+                write!(f, "<nil>")
             }
         } else {
             write!(f, "<invalid-tag>")
@@ -133,8 +176,14 @@ impl<'a> std::fmt::Display for LispFmt<'a> {
 use std::fmt;
 impl fmt::Debug for LispExp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // write!(f, "{}", lisp_fmt(self, &Heap::new()))
-        todo!()
+        write!(
+            f,
+            "{}",
+            AstFmt {
+                exp: self,
+                heap: &Heap::new()
+            }
+        )
     }
 }
 

@@ -235,6 +235,65 @@ pub fn apply_macro(
     eval((*macro_def.body).clone(), &mut expansion_env, heap)
 }
 
+// pub fn apply_procedure(
+//     proc: &LispExp,
+//     args: &[LispExp],
+//     env: &mut Env,
+//     heap: &mut Heap,
+// ) -> Result<LispExp, String> {
+//     match proc {
+//         LispExp::Native(func) => {
+//             let mut value_args = Vec::with_capacity(args.len());
+//             for arg in args {
+//                 value_args.push(ast_to_value(arg, heap));
+//             }
+
+//             let mut temp_env = env.clone();
+//             let result_val = func(&value_args, &mut temp_env, heap)?;
+//             Ok(value_to_ast(result_val, heap))
+//         }
+//         LispExp::Lambda(lambda) => {
+//             let mut new_env = LispEnv::new(Some(lambda.env.clone()));
+//             if let LispExp::List(params) = &*lambda.params {
+//                 for (param, arg) in params.iter().zip(args.iter()) {
+//                     if let LispExp::Symbol(name) = param {
+//                         new_env
+//                             .borrow_mut()
+//                             .insert(name.clone(), ast_to_value(arg, heap));
+//                     }
+//                 }
+//             }
+//             eval((*lambda.body).clone(), &mut new_env, heap)
+//         }
+//         LispExp::VmClosure {
+//             params,
+//             chunk,
+//             env: closure_env,
+//         } => {
+//             if args.len() != params.len() {
+//                 return Err(format!(
+//                     "Incorrect arity in macro. Expected {}, but got {}",
+//                     params.len(),
+//                     args.len()
+//                 ));
+//             }
+//             let new_env = LispEnv::new(Some(closure_env.clone()));
+//             for (p, a) in params.iter().zip(args.iter()) {
+//                 new_env
+//                     .borrow_mut()
+//                     .insert(p.clone(), ast_to_value(a, heap));
+//             }
+//             let mut sub_vm = Vm::new();
+//             let result_val = sub_vm.execute(chunk.clone(), new_env, heap)?;
+//             Ok(value_to_ast(result_val, heap))
+//         }
+//         _ => Err(format!(
+//             "Object {} is not callable in eval",
+//             lisp_fmt(ast_to_value(proc, heap), heap)
+//         )),
+//     }
+// }
+
 pub fn apply_procedure(
     proc: &LispExp,
     args: &[LispExp],
@@ -247,12 +306,52 @@ pub fn apply_procedure(
             for arg in args {
                 value_args.push(ast_to_value(arg, heap));
             }
-
             let mut temp_env = env.clone();
             let result_val = func(&value_args, &mut temp_env, heap)?;
             Ok(value_to_ast(result_val, heap))
         }
-        _ => Err("Object is not callable".to_string()),
+        LispExp::Lambda(lambda) => {
+            let mut new_env = LispEnv::new(Some(lambda.env.clone()));
+
+            let params_flat = pairs_to_vec(&*lambda.params, heap);
+
+            if let LispExp::List(params) = params_flat {
+                for (param, arg) in params.iter().zip(args.iter()) {
+                    if let LispExp::Symbol(name) = param {
+                        new_env
+                            .borrow_mut()
+                            .insert(name.clone(), ast_to_value(arg, heap));
+                    }
+                }
+            }
+            eval((*lambda.body).clone(), &mut new_env, heap)
+        }
+        LispExp::VmClosure {
+            params,
+            chunk,
+            env: closure_env,
+        } => {
+            if args.len() != params.len() {
+                return Err(format!(
+                    "Aridade incorreta. Esperava {}, recebeu {}",
+                    params.len(),
+                    args.len()
+                ));
+            }
+            let new_env = LispEnv::new(Some(closure_env.clone()));
+            for (p, a) in params.iter().zip(args.iter()) {
+                new_env
+                    .borrow_mut()
+                    .insert(p.clone(), ast_to_value(a, heap));
+            }
+            let mut sub_vm = crate::vm::Vm::new();
+            let result_val = sub_vm.execute(chunk.clone(), new_env, heap)?;
+            Ok(value_to_ast(result_val, heap))
+        }
+        _ => Err(format!(
+            "Objeto '{}' não é uma função chamável in eval",
+            lisp_fmt(ast_to_value(proc, heap), heap)
+        )),
     }
 }
 
@@ -348,6 +447,31 @@ fn find_macro(env: &Env, name: &str, heap: &Heap) -> Option<LispLambda> {
     None
 }
 
+// pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
+//     match exp {
+//         LispExp::Pair(car_val, cdr_val) => {
+//             let mut vec = vec![];
+//             vec.push(value_to_ast(*car_val, heap));
+
+//             let mut current = *cdr_val;
+//             while !current.is_nil() {
+//                 if current.is_gc_ref() {
+//                     if let Some(LispExp::Pair(next_car, next_cdr)) = heap.get(current) {
+//                         vec.push(value_to_ast(*next_car, heap));
+//                         current = *next_cdr;
+//                         continue;
+//                     }
+//                 }
+//                 vec.push(value_to_ast(current, heap));
+//                 break;
+//             }
+//             LispExp::List(vec)
+//         }
+//         LispExp::List(_) => exp.clone(),
+//         _ => exp.clone(),
+//     }
+// }
+
 pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
     match exp {
         LispExp::Pair(car_val, cdr_val) => {
@@ -357,10 +481,19 @@ pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
             let mut current = *cdr_val;
             while !current.is_nil() {
                 if current.is_gc_ref() {
-                    if let Some(LispExp::Pair(next_car, next_cdr)) = heap.get(current) {
-                        vec.push(value_to_ast(*next_car, heap));
-                        current = *next_cdr;
-                        continue;
+                    match heap.get(current) {
+                        Some(LispExp::Pair(next_car, next_cdr)) => {
+                            vec.push(value_to_ast(*next_car, heap));
+                            current = *next_cdr;
+                            continue;
+                        }
+                        Some(LispExp::List(l)) => {
+                            for item in l {
+                                vec.push(item.clone());
+                            }
+                            break;
+                        }
+                        _ => {}
                     }
                 }
                 vec.push(value_to_ast(current, heap));

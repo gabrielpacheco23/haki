@@ -112,14 +112,22 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             Ok(heap.alloc(LispExp::Pair(args[0], args[1])))
         });
 
-        add_native!(env, heap, "car", |args, _, heap| {
+        add_native!(env, heap, "car", |args, _, h| {
             if args.is_empty() {
                 return Err("'car' requires 1 argument".to_string());
             }
 
             if args[0].is_gc_ref() {
-                if let Some(LispExp::Pair(car, _cdr)) = heap.get(args[0]) {
-                    return Ok(*car);
+                match h.get(args[0]) {
+                    Some(LispExp::Pair(car, _cdr)) => return Ok(*car),
+                    Some(LispExp::List(vec)) => {
+                        let vec_clone = vec.clone();
+                        if vec_clone.is_empty() {
+                            return Err("car: empty list".to_string());
+                        }
+                        return Ok(ast_to_value(&vec_clone[0], h));
+                    }
+                    _ => {}
                 }
             }
             Err("'car' requires a pair or list".to_string())
@@ -131,14 +139,20 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
 
             if args[0].is_gc_ref() {
-                if let Some(LispExp::Pair(_car, cdr)) = heap.get(args[0]) {
-                    return Ok(*cdr);
+                match heap.get(args[0]) {
+                    Some(LispExp::Pair(_car, cdr)) => return Ok(*cdr),
+                    Some(LispExp::List(vec)) => {
+                        if vec.is_empty() {
+                            return Err("cdr: empty list".to_string());
+                        }
+                        let rest = LispExp::List(vec[1..].to_vec());
+                        return Ok(crate::helpers::ast_to_value(&rest, heap));
+                    }
+                    _ => {}
                 }
             }
             Err("'cdr' requires a pair or list".to_string())
         });
-
-        // def_fold!(env, heap, "max", |acc: Value, next: Value, _heap| {});
 
         add_native!(env, heap, "expt", |args, _, _| {
             if args.len() != 2 || !args[0].is_number() || !args[1].is_number() {
@@ -149,16 +163,59 @@ pub fn standard_env(heap: &mut Heap) -> Env {
 
         def_is!(env, heap, "number?", |v: &Value, _| v.is_number());
         def_is!(env, heap, "boolean?", |v: &Value, _| v.is_boolean());
-        def_is!(env, heap, "null?", |v: &Value, _| v.is_nil());
-        def_is!(env, heap, "pair?", |v: &Value, h: &mut Heap| {
-            v.is_gc_ref() && matches!(h.get(*v), Some(LispExp::Pair(_, _)))
+        def_is!(env, heap, "null?", |v: &Value, h: &mut Heap| {
+            if v.is_nil() {
+                return true;
+            }
+            if v.is_gc_ref() {
+                if let Some(LispExp::List(l)) = h.get(*v) {
+                    return l.is_empty();
+                }
+            }
+            false
         });
+        def_is!(env, heap, "pair?", |v: &Value, h: &mut Heap| {
+            if v.is_gc_ref() {
+                match h.get(*v) {
+                    Some(LispExp::Pair(_, _)) => return true,
+                    Some(LispExp::List(l)) => return !l.is_empty(),
+                    _ => return false,
+                }
+            }
+            false
+        });
+
+        // add_native!(env, heap, "list?", |args, _, heap| {
+        //     if args.len() != 1 {
+        //         return Err("'list?' requires 1 argument".to_string());
+        //     }
+        //     let mut current = args[0];
+        //     loop {
+        //         if current.is_nil() {
+        //             return Ok(Value::boolean(true));
+        //         }
+        //         if current.is_gc_ref() {
+        //             if let Some(LispExp::Pair(_, cdr)) = heap.get(current) {
+        //                 current = *cdr;
+        //                 continue;
+        //             }
+        //         }
+        //         return Ok(Value::boolean(false));
+        //     }
+        // });
 
         add_native!(env, heap, "list?", |args, _, heap| {
             if args.len() != 1 {
                 return Err("'list?' requires 1 argument".to_string());
             }
             let mut current = args[0];
+
+            if current.is_gc_ref() {
+                if let Some(LispExp::List(_)) = heap.get(current) {
+                    return Ok(Value::boolean(true));
+                }
+            }
+
             loop {
                 if current.is_nil() {
                     return Ok(Value::boolean(true));
@@ -172,6 +229,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return Ok(Value::boolean(false));
             }
         });
+
         def_is!(env, heap, "vector?", |v: &Value, h: &mut Heap| {
             v.is_gc_ref() && matches!(h.get(*v), Some(LispExp::Vector(_)))
         });
@@ -465,6 +523,28 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
             }
             Err("'load' requires a string path".to_string())
+        });
+
+        add_native!(env, heap, "require", |args, env, h| {
+            if let Some(val) = args.first() {
+                if val.is_gc_ref() {
+                    let path_str = if let Some(LispExp::Str(path)) = h.get(*val) {
+                        path.clone()
+                    } else {
+                        return Err("'require' requires a string path".to_string());
+                    };
+
+                    if env.borrow().loaded_files.contains(&path_str) {
+                        return Ok(Value::boolean(true));
+                    }
+
+                    let result_ast = run_script(&path_str, env, h)?;
+                    env.borrow_mut().loaded_files.insert(path_str);
+
+                    return Ok(ast_to_value(&result_ast, h));
+                }
+            }
+            Err("'require' requires a string path".to_string())
         });
 
         add_native!(env, heap, "shell", |args, _, heap| {

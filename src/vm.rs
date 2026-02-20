@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::{helpers::ast_to_value, value::Value};
 use std::{fmt::Display, rc::Rc};
 
 use crate::{
@@ -264,26 +264,69 @@ impl Vm {
                     let pair_ptr = heap.alloc(LispExp::Pair(a, b));
                     self.stack.push(pair_ptr);
                 }
+                // OpCode::Car => {
+                //     let obj = self.stack.pop().unwrap_or(Value::void());
+                //     if obj.is_gc_ref() {
+                //         if let Some(LispExp::Pair(car, _cdr)) = heap.get(obj) {
+                //             self.stack.push(*car);
+                //             continue;
+                //         }
+                //     }
+                //     return Err("'car' requires a pair or list".to_string());
+                // }
                 OpCode::Car => {
                     let obj = self.stack.pop().unwrap_or(Value::void());
+
                     if obj.is_gc_ref() {
-                        if let Some(LispExp::Pair(car, _cdr)) = heap.get(obj) {
-                            self.stack.push(*car);
-                            continue;
+                        match heap.get(obj) {
+                            Some(LispExp::Pair(car, _cdr)) => {
+                                self.stack.push(*car);
+                                continue;
+                            }
+                            Some(LispExp::List(vec)) => {
+                                let vec = vec.clone();
+                                if vec.is_empty() {
+                                    return Err("car: empty list".to_string());
+                                }
+                                self.stack.push(ast_to_value(&vec[0], heap));
+                                continue;
+                            }
+                            _ => {}
                         }
                     }
                     return Err("'car' requires a pair or list".to_string());
                 }
                 OpCode::Cdr => {
                     let obj = self.stack.pop().unwrap_or(Value::void());
+
                     if obj.is_gc_ref() {
-                        if let Some(LispExp::Pair(_car, cdr)) = heap.get(obj) {
-                            self.stack.push(*cdr);
-                            continue;
+                        match heap.get(obj) {
+                            Some(LispExp::Pair(_car, cdr)) => {
+                                self.stack.push(*cdr);
+                                continue;
+                            }
+                            Some(LispExp::List(vec)) => {
+                                if vec.is_empty() {
+                                    return Err("cdr: empty list".to_string());
+                                }
+                                let rest = LispExp::List(vec[1..].to_vec());
+                                self.stack.push(ast_to_value(&rest, heap));
+                                continue;
+                            }
+                            _ => {}
                         }
                     }
                     return Err("'cdr' requires a pair or list".to_string());
-                }
+                } // OpCode::Cdr => {
+                  //     let obj = self.stack.pop().unwrap_or(Value::void());
+                  //     if obj.is_gc_ref() {
+                  //         if let Some(LispExp::Pair(_car, cdr)) = heap.get(obj) {
+                  //             self.stack.push(*cdr);
+                  //             continue;
+                  //         }
+                  //     }
+                  //     return Err("'cdr' requires a pair or list".to_string());
+                  // }
             }
         }
     }
