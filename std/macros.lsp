@@ -45,8 +45,18 @@
           (let ((temp (car args)))
             (list 'let (list (list 'temp temp))
                   (list 'if 'temp 'temp (cons 'or (cdr args))))))))
-
 (defmacro (|> x &rest forms)
+  (if (null? forms)
+      x
+      (let ((form (car forms))
+            (rest (cdr forms)))
+        (let ((new-x (if (list? form)
+                         (cons (car form) (cons x (cdr form)))
+                         (list form x))))
+          (cons '|> (cons new-x rest))))))
+
+
+(defmacro (|>> x &rest forms)
   (if (null? forms)
       x
       (let ((form (car forms))
@@ -54,7 +64,7 @@
         (let ((new-x (if (list? form)
                          (append form (list x))
                          (list form x))))
-          (cons '|> (cons new-x rest))))))
+          (cons '|>> (cons new-x rest))))))
 
 ;; A Macro de Pattern Matching Básica
 (defmacro (match expr &rest clauses)
@@ -126,3 +136,44 @@
     ;; Envelopa tudo para avaliar a expressão apenas uma vez
     (list 'let (list (list '__match_target expr))
           (cons 'cond (map compile-clause clauses)))))
+
+; ==========================================
+;; MACRO DE PERFORMANCE (time)
+;; ==========================================
+(defmacro (time expr)
+  `(let ((__start (time-ms))
+         (__result ,expr)
+         (__end (time-ms)))
+     (display "Execution time: ")
+     (display (- __end __start))
+     (displayln " ms")
+     __result))
+
+;; ==========================================
+;; SYNTAX SUGAR: LOOPS (while e dotimes)
+;; ==========================================
+
+;; Loop condicional infinito estilo C: (while (< x 10) ...)
+(defmacro (while condition &rest body)
+  `(let ()
+     (define (__loop)
+       (if ,condition
+           (begin
+             ;; Empacotamos o corpo de forma dinâmica
+             ,(cons 'begin body)
+             (__loop))
+           void))
+     (__loop)))
+
+;; Loop iterativo com contador: (dotimes (i 5) ...)
+(defmacro (dotimes bindings &rest body)
+  (let ((var (car bindings))
+        (limit (car (cdr bindings))))
+    `(let ((__limit ,limit))
+       (define (__loop ,var)
+         (if (< ,var __limit)
+             (begin
+               ,(cons 'begin body)
+               (__loop (+ ,var 1)))
+             void))
+       (__loop 0))))

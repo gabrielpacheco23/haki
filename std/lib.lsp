@@ -1,4 +1,9 @@
-(define print (lambda (x) x)) 
+;; ==========================================
+;; BIBLIOTECA PADRÃO - HAKI LISP
+;; ==========================================
+
+(define print display x) 
+(define println displayln x) 
 
 ; (define cadr (lambda (x) (car (cdr x))))
 
@@ -50,12 +55,12 @@
       acc
       (fold f (f acc (car lst)) (cdr lst))))
 
-(define (reverse lst)
-  (define (rev-acc l acc)
-    (if (null? l)
-        acc
-        (rev-acc (cdr l) (cons (car l) acc))))
-  (rev-acc lst '()))
+; (define (reverse lst)
+;   (define (rev-acc l acc)
+;     (if (null? l)
+;         acc
+;         (rev-acc (cdr l) (cons (car l) acc))))
+;   (rev-acc lst '()))
 
 (define (length lst)
   (define (len-acc l count)
@@ -71,5 +76,82 @@
 
 
 ;; ======= web ===============
-(define (http-get url)
-  (shell (string-append "curl -s " url)))
+; (define (http-get url)
+;   (shell (string-append "curl -s " url)))
+
+;; 1. GERADORES E MANIPULADORES
+;; Cria uma lista de números de 'start' até 'end' (exclusivo)
+(define (range start end)
+  (if (>= start end)
+      '()
+      (cons start (range (+ start 1) end))))
+
+;; Inverte uma lista completamente: '(1 2 3) -> '(3 2 1)
+(define (reverse lst)
+  (fold (lambda (acc x) (cons x acc)) '() lst))
+
+;; Pega os primeiros N elementos de uma lista
+(define (take n lst)
+  (if (or (<= n 0) (null? lst))
+      '()
+      (cons (car lst) (take (- n 1) (cdr lst)))))
+
+;; Zíper: Junta duas listas em pares (como o Python) 
+;; Ex: (zip '(1 2) '(a b)) -> '((1 a) (2 b))
+(define (zip lst1 lst2)
+  (if (or (null? lst1) (null? lst2))
+      '()
+      (cons (list (car lst1) (car lst2))
+            (zip (cdr lst1) (cdr lst2)))))
+
+;; 2. CHECAGENS DE ALTO NÍVEL (Predicados de Coleção)
+;; Retorna #t se ALGUM item da lista passar no teste (predicado)
+(define (any? pred lst)
+  (if (null? lst)
+      #f
+      (if (pred (car lst))
+          #t
+          (any? pred (cdr lst)))))
+
+;; Retorna #t apenas se TODOS os itens da lista passarem no teste
+(define (all? pred lst)
+  (if (null? lst)
+      #t
+      (if (pred (car lst))
+          (all? pred (cdr lst))
+          #f)))
+
+;; 3. FERRAMENTA DE TESTE/VALIDAÇÃO
+(define (assert condition msg)
+  (if condition
+      #t
+      (error "[ASSERT FAILED]" msg)))
+
+;; Junta uma lista de strings com um separador
+;; Ex: (string-join '("A" "B" "C") "-") -> "A-B-C"
+(define (string-join lst sep)
+  (if (null? lst)
+      ""
+      (if (null? (cdr lst))
+          (car lst)
+          (string-append (car lst) sep (string-join (cdr lst) sep)))))
+
+;; Função Absoluta (Módulo)
+(define (abs x)
+  (if (< x 0) (- x) x))
+
+;; Composição de funções: f(g(x))
+;; Ex: (define dobro-absoluto (compose abs (lambda (x) (* x 2))))
+(define (compose f g)
+  (lambda (x) (f (g x))))
+
+;; Pipeline operator estilo Elixir/F# (Macro)
+; (defmacro (-> x &rest forms)
+;   (if (null? forms)
+;       x
+;       (let ((form (car forms))
+;             (rest (cdr forms)))
+;         (let ((new-x (if (list? form)
+;                          (append form (list x))
+;                          (list form x))))
+;           (cons '-> (cons new-x rest))))))

@@ -40,9 +40,6 @@ pub enum LispExp {
 
 use std::rc::Rc;
 
-// ==========================================
-// 1. O FORMATADOR DA ÁRVORE (Entende `&LispExp`)
-// ==========================================
 pub struct AstFmt<'a> {
     pub exp: &'a LispExp,
     pub heap: &'a Heap,
@@ -52,7 +49,7 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.exp {
             LispExp::Number(n) => write!(f, "{}", n),
-            LispExp::Str(s) => write!(f, "{}", s),
+            LispExp::Str(s) => write!(f, "\"{}\"", s),
             LispExp::Symbol(s, _) => write!(f, "{}", s),
             LispExp::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
             LispExp::Nil => write!(f, "()"),

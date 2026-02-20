@@ -1,6 +1,7 @@
 use crate::value::Value;
 use crate::{arithmetic_op, def_fold1};
 use rand::RngExt;
+use regex::Regex;
 
 use crate::heap::{Heap, collect_garbage};
 use crate::helpers::ast_to_value;
@@ -312,18 +313,31 @@ pub fn standard_env(heap: &mut Heap) -> Env {
         env.insert("nil".to_string(), Value::nil());
         env.insert("void".to_string(), Value::void());
 
-        add_native!(env, heap, "display", |args, _, heap| {
+        add_native!(env, heap, "display", |args, _, h| {
             use std::io::Write;
             for arg in args {
-                print!("{}", lisp_fmt(*arg, heap));
+                if arg.is_gc_ref() {
+                    if let Some(LispExp::Str(s)) = h.get(*arg) {
+                        print!("{}", s);
+                        continue;
+                    }
+                }
+
+                print!("{}", lisp_fmt(*arg, h));
             }
             std::io::stdout().flush().unwrap();
             Ok(Value::void())
         });
 
-        add_native!(env, heap, "displayln", |args, _, heap| {
+        add_native!(env, heap, "displayln", |args, _, h| {
             for arg in args {
-                print!("{}", lisp_fmt(*arg, heap));
+                if arg.is_gc_ref() {
+                    if let Some(LispExp::Str(s)) = h.get(*arg) {
+                        print!("{}", s);
+                        continue;
+                    }
+                }
+                print!("{}", lisp_fmt(*arg, h));
             }
             println!();
             Ok(Value::void())
@@ -814,6 +828,85 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let after = heap.memory.len() - heap.free_list.len();
             println!("[GC] Cleaned {} object(s).", before - after);
             Ok(Value::void())
+        });
+
+        add_native!(env, heap, "time-ms", |_, _, _| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let start = SystemTime::now();
+            let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time is broken");
+            Ok(Value::number(since_the_epoch.as_millis() as f64))
+        });
+
+        add_native!(env, heap, "error", |args, _, h| {
+            let mut err_msg = String::new();
+            for arg in args {
+                err_msg.push_str(&lisp_fmt(*arg, h).to_string());
+                err_msg.push(' ');
+            }
+            Err(err_msg.trim().to_string())
+        });
+
+        add_native!(env, heap, "regex-match?", |args, _, h| {
+            if args.len() != 2 {
+                return Err("'regex-match?' requires (pattern string)".to_string());
+            }
+            if let (Some(LispExp::Str(pat)), Some(LispExp::Str(text))) =
+                (h.get(args[0]), h.get(args[1]))
+            {
+                let re = Regex::new(pat).map_err(|e| e.to_string())?;
+                return Ok(Value::boolean(re.is_match(text)));
+            }
+
+            Err("Expected 2 strings".to_string())
+        });
+
+        add_native!(env, heap, "regex-replace", |args, _, h| {
+            if args.len() != 3 {
+                return Err("'regex-replace' requires (pattern string replacement)".to_string());
+            }
+            if let (Some(LispExp::Str(pat)), Some(LispExp::Str(text)), Some(LispExp::Str(rep))) =
+                (h.get(args[0]), h.get(args[1]), h.get(args[2]))
+            {
+                let re = regex::Regex::new(pat).map_err(|e| e.to_string())?;
+                let result = re.replace_all(text, rep).to_string();
+                return Ok(h.alloc_string(result));
+            }
+            Err("Expected 3 strings".to_string())
+        });
+
+        add_native!(env, heap, "http-get", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'http-get' requires a URL".to_string());
+            }
+            if let Some(LispExp::Str(url)) = h.get(args[0]) {
+                let body = ureq::get(url)
+                    .call()
+                    .map_err(|e| e.to_string())?
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| e.to_string())?;
+                return Ok(h.alloc_string(body));
+            }
+            Err("Expected a string URL".to_string())
+        });
+
+        add_native!(env, heap, "exit", |args, _, _| {
+            let code = if args.len() == 1 && args[0].is_number() {
+                args[0].as_number() as i32
+            } else {
+                0
+            };
+            std::process::exit(code);
+        });
+
+        add_native!(env, heap, "file-exists?", |args, _, heap| {
+            if args.len() != 1 {
+                return Err("requires 1 path".to_string());
+            }
+            if let Some(LispExp::Str(path)) = heap.get(args[0]) {
+                return Ok(Value::boolean(std::path::Path::new(path).exists()));
+            }
+            Err("Expected string path".to_string())
         });
     }
 
