@@ -95,7 +95,7 @@ Haki is ready for the web. Use the native shell bridge and JSON parser to intera
 
 ```scheme
 ;; Fetch data from an API and parse it natively
-(define raw-response (shell "curl -s [https://dummyjson.com/products/1](https://dummyjson.com/products/1)"))
+(define raw-response (shell "curl -s https://dummyjson.com/products/1"))
 (define product (parse-json raw-response))
 
 (display "Product Name: ")
