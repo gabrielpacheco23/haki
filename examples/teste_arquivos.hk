@@ -1,0 +1,36 @@
+(displayln "=== TESTE DE TRY/CATCH E ARQUIVOS ===")
+
+;; 1. Testando um Erro Fatal do Core (car de string)
+(displayln "\n1. Testando crash da Máquina Virtual...")
+(try 
+  (car "Eu não sou uma lista")
+  (catch erro-vm
+    (display "O Lisp foi salvo! O erro interceptado foi: ")
+    (displayln erro-vm)))
+
+;; 2. Criando um arquivo
+(displayln "\n2. Testando IO...")
+(define meu-arquivo "haki_teste.txt")
+(write-file meu-arquivo "Haki Lisp dominará o mundo!")
+(display "O arquivo existe? ")
+(displayln (file-exists? meu-arquivo))
+
+;; 3. Listando o diretório
+(displayln "\n3. Arquivos na pasta atual:")
+(displayln (list-dir "."))
+
+;; 4. Deletando o arquivo com segurança
+(displayln "\n4. Removendo arquivo de teste...")
+(delete-file meu-arquivo)
+(display "O arquivo existe? ")
+(displayln (file-exists? meu-arquivo))
+
+;; 5. Testando ler um arquivo deletado (Erro de IO)
+(displayln "\n5. Lendo arquivo que não existe...")
+(try
+  (read-file meu-arquivo)
+  (catch erro-io
+    (display "Capturamos um erro de SO nativo! Motivo: ")
+    (displayln erro-io)))
+
+(displayln "\nSe você está lendo isso, o try/catch impediu o programa de morrer!")

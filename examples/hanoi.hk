@@ -1,0 +1,19 @@
+(define (hanoi n origem destino auxiliar)
+  (if (= n 1)
+      (begin
+        (display "Move disco 1 de [") (display origem) 
+        (display "] para [") (display destino) (displayln "]"))
+      (begin
+        ;; Move n-1 discos para o pino auxiliar
+        (hanoi (- n 1) origem auxiliar destino)
+        
+        ;; Move o disco atual para o destino
+        (display "Move disco ") (display n) (display " de [") 
+        (display origem) (display "] para [") (display destino) (displayln "]")
+        
+        ;; Move os n-1 discos do auxiliar para o destino
+        (hanoi (- n 1) auxiliar destino origem))))
+
+(displayln "Resolvendo Torre de Hanói para 3 discos:")
+(displayln "========================================")
+(time (hanoi 3 "A" "C" "B"))

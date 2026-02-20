@@ -177,3 +177,17 @@
                (__loop (+ ,var 1)))
              void))
        (__loop 0))))
+
+ ;; ==========================================
+;; TRATAMENTO DE ERROS (Try / Catch)
+;; Uso: (try (codigo perigoso) (catch err (displayln err)))
+;; ==========================================
+(defmacro (try try-expr catch-expr)
+  (let ((catch-kw (car catch-expr))
+        (err-var (cadr catch-expr))
+        (catch-body (cdr (cdr catch-expr))))
+    (if (equal? catch-kw 'catch)
+        `(try-catch 
+           (lambda () ,try-expr)
+           (lambda (,err-var) ,(cons 'begin catch-body)))
+        (error "Malformed try block. Expected: (try expr (catch var ...))"))))

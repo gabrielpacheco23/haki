@@ -1,0 +1,32 @@
+(define (cifra-cesar texto deslocamento)
+  (define (deslocar-char c)
+    (let ((ascii (char->ascii c)))
+      (cond
+        ((and (>= ascii 65) (<= ascii 90))
+         (ascii->char (+ 65 (modulo (+ (- ascii 65) deslocamento) 26))))
+         
+        ((and (>= ascii 97) (<= ascii 122))
+         (ascii->char (+ 97 (modulo (+ (- ascii 97) deslocamento) 26))))
+         
+        ;; Mantém espaços e pontuação originais
+        (#t c))))
+        
+(string-join
+  (|>> (string->list texto) 
+       (map deslocar-char))
+  ""))
+
+(displayln "=== CIFRA DE CÉSAR EM HAKI ===")
+(define msg-secreta "O Haki Lisp ataca ao amanhecer!")
+
+(display "Original:    ")
+(displayln msg-secreta)
+
+(define msg-criptografada (cifra-cesar msg-secreta 5))
+(display "Cifrada (+5): ")
+(displayln msg-criptografada)
+
+;; Para decriptar, basta rotacionar para trás (26 - 5)
+(define msg-decriptografada (cifra-cesar msg-criptografada 21))
+(display "Decriptada:   ")
+(displayln msg-decriptografada)

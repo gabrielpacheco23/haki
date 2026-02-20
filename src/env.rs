@@ -4,7 +4,7 @@ use rand::RngExt;
 use regex::Regex;
 
 use crate::heap::{Heap, collect_garbage};
-use crate::helpers::ast_to_value;
+use crate::helpers::{apply_procedure, ast_to_value, value_to_ast};
 use crate::{compare_op, def_fold, def_is, def_math};
 use crate::{expr::*, run_script};
 use std::cell::RefCell;
@@ -816,7 +816,20 @@ pub fn standard_env(heap: &mut Heap) -> Env {
         add_native!(env, heap, "random", |args, _, _| {
             let mut rng = rand::rng();
             if args.len() == 2 && args[0].is_number() && args[1].is_number() {
-                let num = rng.random_range(args[0].as_number()..args[1].as_number());
+                let min = args[0].as_number() as i64;
+                let max = args[1].as_number() as i64;
+                let num = rng.random_range(min..max);
+                return Ok(Value::number(num as f64));
+            }
+            Err("'random' expects 2 numbers".to_string())
+        });
+
+        add_native!(env, heap, "random->float", |args, _, _| {
+            let mut rng = rand::rng();
+            if args.len() == 2 && args[0].is_number() && args[1].is_number() {
+                let min = args[0].as_number();
+                let max = args[1].as_number();
+                let num = rng.random_range(min..max);
                 return Ok(Value::number(num));
             }
             Err("'random' expects 2 numbers".to_string())
@@ -907,6 +920,136 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return Ok(Value::boolean(std::path::Path::new(path).exists()));
             }
             Err("Expected string path".to_string())
+        });
+
+        add_native!(env, heap, "delete-file", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'delete-file' requires 1 path".to_string());
+            }
+            if let Some(LispExp::Str(path)) = h.get(args[0]) {
+                match std::fs::remove_file(path) {
+                    Ok(_) => return Ok(Value::boolean(true)),
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Err("Expected string path".to_string())
+        });
+
+        add_native!(env, heap, "list-dir", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'list-dir' requires 1 path".to_string());
+            }
+            if let Some(LispExp::Str(path)) = h.get(args[0]) {
+                match std::fs::read_dir(path) {
+                    Ok(entries) => {
+                        let mut result = Value::nil();
+                        let mut paths = vec![];
+                        for entry in entries.flatten() {
+                            if let Ok(name) = entry.file_name().into_string() {
+                                paths.push(name);
+                            }
+                        }
+                        for p in paths.into_iter().rev() {
+                            let str_val = h.alloc_string(p);
+                            result = h.alloc(LispExp::Pair(str_val, result));
+                        }
+                        return Ok(result);
+                    }
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Err("Expected string path".to_string())
+        });
+
+        add_native!(env, heap, "try-catch", |args, env_ref, heap| {
+            if args.len() != 2 {
+                return Err("'try-catch' requires (try-thunk catch-fn)".to_string());
+            }
+
+            let try_thunk = value_to_ast(args[0], heap);
+            let catch_fn = value_to_ast(args[1], heap);
+
+            match apply_procedure(&try_thunk, &[], env_ref, heap) {
+                Ok(res) => Ok(crate::helpers::ast_to_value(&res, heap)),
+                Err(err_msg) => {
+                    let err_exp = LispExp::Str(err_msg);
+
+                    match apply_procedure(&catch_fn, &[err_exp], env_ref, heap) {
+                        Ok(res) => Ok(crate::helpers::ast_to_value(&res, heap)),
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        });
+
+        // TODO: REMOVE THIS DUPLICATE
+        add_native!(env, heap, "vector->list", |args, _, h| {
+            if let Some(val) = args.first() {
+                if val.is_gc_ref() {
+                    let vec_clone = if let Some(LispExp::Vector(vec)) = h.get(*val) {
+                        vec.clone()
+                    } else {
+                        return Ok(Value::nil());
+                    };
+
+                    let mut result = Value::nil();
+                    for item in vec_clone.iter().rev() {
+                        result = h.alloc(LispExp::Pair(*item, result));
+                    }
+                    return Ok(result);
+                }
+            }
+            Ok(Value::nil())
+        });
+
+        // Transforma "Haki" em '("H" "a" "k" "i")
+        add_native!(env, heap, "string->list", |args, _, h| {
+            if args.len() != 1 {
+                return Err("requires 1 string".to_string());
+            }
+
+            if let Some(val) = args.first() {
+                if val.is_gc_ref() {
+                    let str_clone = if let Some(LispExp::Str(s)) = h.get(*val) {
+                        s.clone()
+                    } else {
+                        return Ok(Value::nil());
+                    };
+
+                    let mut result = Value::nil();
+
+                    for c in str_clone.chars().rev() {
+                        let char_str = h.alloc_string(c.to_string());
+                        result = h.alloc(LispExp::Pair(char_str, result));
+                    }
+                    return Ok(result);
+                }
+            }
+
+            Err("Expected string".to_string())
+        });
+
+        add_native!(env, heap, "char->ascii", |args, _, heap| {
+            if args.len() != 1 {
+                return Err("requires 1 char string".to_string());
+            }
+            if let Some(LispExp::Str(s)) = heap.get(args[0]) {
+                if let Some(c) = s.chars().next() {
+                    return Ok(Value::number(c as u32 as f64));
+                }
+            }
+            Err("Expected char string".to_string())
+        });
+
+        add_native!(env, heap, "ascii->char", |args, _, heap| {
+            if args.len() != 1 {
+                return Err("requires 1 number".to_string());
+            }
+            let code = args[0].as_number() as u32;
+            if let Some(c) = char::from_u32(code) {
+                return Ok(heap.alloc_string(c.to_string()));
+            }
+            Err("Invalid ASCII code".to_string())
         });
     }
 

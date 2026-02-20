@@ -1,0 +1,12 @@
+; ;; Função que busca um termo em um arquivo
+(define (mini-grep termo arquivo)
+  (try
+    (|>> (string-split (read-file arquivo) "\n")
+         (filter (lambda (linha) (string-contains? linha termo)))
+         (map (lambda (linha) 
+                (display "> ")
+                (displayln (string-trim linha)))))
+    (catch err
+      (displayln (string-append "ERRO: " err)))))
+
+(mini-grep "let" "tests.hk")

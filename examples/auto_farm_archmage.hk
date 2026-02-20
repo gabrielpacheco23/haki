@@ -1,0 +1,25 @@
+(load "ydotool.scm")
+
+(define target-app "Artix Game Launcher")
+
+(define (is-focused? app-name)
+  (let ((output (shell (string-append "hyprctl activewindow | grep -i \"class: .*" app-name "\""))))
+    (> (string-length output) 0)))
+
+(define (loop)
+  (if (is-focused? target-app)
+      (begin
+        (displayln (string-append "Active! Pressing key in " target-app))
+        (auto-press-key 3 500)
+        (auto-press-key 2 500)
+        (auto-press-key 4 500))
+      
+      ;; Else: Just wait
+      (displayln "Waiting... (Target app not focused)"))
+
+  ;; Sleep to prevent CPU spam
+  (sleep 1000)
+  (loop))
+
+;; Start
+(loop)
