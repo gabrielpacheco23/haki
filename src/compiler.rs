@@ -41,7 +41,8 @@ pub fn compile(
             }
         }
         LispExp::Str(s) => {
-            let val = heap.alloc(LispExp::Str(s.clone()));
+            // let val = heap.alloc(LispExp::Str(s.clone()));
+            let val = heap.alloc_string(s.clone());
             let idx = chunk.add_constant(val);
             chunk.code.push(OpCode::Constant(idx));
 

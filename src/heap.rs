@@ -1,10 +1,12 @@
 use crate::value::Value;
 use crate::{env::Env, expr::LispExp};
+use std::collections::HashMap as RustHashMap;
 
 pub struct Heap {
     pub memory: Vec<LispExp>,
     pub free_list: Vec<usize>,
     pub marked: Vec<bool>,
+    pub string_pool: RustHashMap<String, Value>,
 }
 
 impl Heap {
@@ -13,7 +15,18 @@ impl Heap {
             memory: vec![],
             free_list: vec![],
             marked: vec![],
+            string_pool: RustHashMap::new(),
         }
+    }
+
+    pub fn alloc_string(&mut self, s: String) -> Value {
+        if let Some(val) = self.string_pool.get(&s) {
+            return *val;
+        }
+
+        let val = self.alloc(LispExp::Str(s.clone()));
+        self.string_pool.insert(s, val);
+        val
     }
 
     pub fn alloc(&mut self, exp: LispExp) -> Value {
@@ -123,6 +136,9 @@ impl Heap {
 
     pub fn sweep(&mut self, debug_gc: bool) {
         let mut bytes_freed = 0;
+
+        self.string_pool
+            .retain(|_, val| self.marked[val.as_gc_ref()]);
 
         for i in 0..self.memory.len() {
             if !self.marked[i] && !matches!(self.memory[i], LispExp::Void) {

@@ -404,7 +404,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
                 return Err("'string-append' requires strings".to_string());
             }
-            Ok(heap.alloc(LispExp::Str(result)))
+            Ok(heap.alloc_string(result))
         });
 
         add_native!(env, heap, "string-length", |args, _, heap| {
@@ -436,7 +436,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return Err("'to-upper' requires 1 string".to_string());
             }
             if let Some(LispExp::Str(s)) = heap.get(args[0]) {
-                Ok(heap.alloc(LispExp::Str(s.to_uppercase())))
+                Ok(heap.alloc_string(s.to_uppercase()))
             } else {
                 Err("'to-upper' requires a string".to_string())
             }
@@ -447,7 +447,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return Err("'to-lower' requires 1 string".to_string());
             }
             if let Some(LispExp::Str(s)) = heap.get(args[0]) {
-                Ok(heap.alloc(LispExp::Str(s.to_lowercase())))
+                Ok(heap.alloc_string(s.to_lowercase()))
             } else {
                 Err("'to-lower' requires a string".to_string())
             }
@@ -458,7 +458,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return Err("'string-trim' requires a string".to_string());
             }
             if let Some(LispExp::Str(s)) = heap.get(args[0]) {
-                Ok(heap.alloc(LispExp::Str(s.trim().to_string())))
+                Ok(heap.alloc_string(s.trim().to_string()))
             } else {
                 Err("'string-trim' requires a string".to_string())
             }
@@ -468,7 +468,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             if let Some(val) = args.first() {
                 if val.is_number() {
                     let s = val.as_number().to_string();
-                    return Ok(heap.alloc(LispExp::Str(s)));
+                    return Ok(heap.alloc_string(s));
                 }
             }
             Err("'number->string' expects a number".to_string())
@@ -499,7 +499,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                     let end = args[2].as_number() as usize;
                     if start <= end && end <= s.len() {
                         let subs = &s[start..end];
-                        return Ok(heap.alloc(LispExp::Str(subs.to_string())));
+                        return Ok(heap.alloc_string(subs.to_string()));
                     }
                 }
             }
@@ -557,7 +557,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                             .output()
                             .map_err(|e| format!("Shell error: {}", e))?;
                         let res = String::from_utf8_lossy(&output.stdout).to_string();
-                        return Ok(heap.alloc(LispExp::Str(res)));
+                        return Ok(heap.alloc_string(res));
                     }
                 }
             }
@@ -579,7 +579,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 if val.is_gc_ref() {
                     if let Some(LispExp::Str(key)) = heap.get(*val) {
                         return match std::env::var(key) {
-                            Ok(res) => Ok(heap.alloc(LispExp::Str(res))),
+                            Ok(res) => Ok(heap.alloc_string(res)),
                             Err(_) => Ok(Value::nil()),
                         };
                     }
@@ -605,7 +605,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 if val.is_gc_ref() {
                     if let Some(LispExp::Str(path)) = heap.get(*val) {
                         let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-                        return Ok(heap.alloc(LispExp::Str(content)));
+                        return Ok(heap.alloc_string(content));
                     }
                 }
             }
@@ -657,7 +657,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 } else {
                     "unknown"
                 };
-                return Ok(heap.alloc(LispExp::Str(type_str.to_string())));
+                return Ok(heap.alloc_string(type_str.to_string()));
             }
             Err("'type-of' expects a value".to_string())
         });
@@ -779,7 +779,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
 
                     let mut result = Value::nil();
                     for key in keys {
-                        let key_val = heap.alloc(LispExp::Str(key));
+                        let key_val = heap.alloc_string(key);
                         result = heap.alloc(LispExp::Pair(key_val, result));
                     }
                     return Ok(result);
@@ -847,7 +847,7 @@ fn json_to_lisp(value: &serde_json::Value, heap: &mut Heap) -> Value {
         serde_json::Value::Null => Value::nil(),
         serde_json::Value::Bool(b) => Value::boolean(*b),
         serde_json::Value::Number(num) => Value::number(num.as_f64().unwrap_or(0.0)),
-        serde_json::Value::String(s) => heap.alloc(LispExp::Str(s.clone())),
+        serde_json::Value::String(s) => heap.alloc_string(s.clone()),
         serde_json::Value::Array(arr) => {
             let vec: Vec<Value> = arr.iter().map(|item| json_to_lisp(item, heap)).collect();
             heap.alloc(LispExp::Vector(vec))
