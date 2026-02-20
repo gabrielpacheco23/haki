@@ -119,7 +119,7 @@ Haki is pretty much functional, but its not yet a full mature programming langua
 
 - [ ] **Expand the Standard Library:** Grow `std` and native Rust functions to include more robust file I/O operations, advanced math utilities, regex support, and deep string manipulation.
 - [ ] **Error Reporting:** Add line numbers, column tracking, and stack traces to make debugging Haki scripts even more developer-friendly.
-- [ ] **NaN Tagging (Optimization):** Optimize the memory footprint of `LispExp` down to 8 bytes by packing pointers and booleans inside the unused bits of an `f64` float.
+- [x] **NaN Tagging (Optimization):** Optimize the memory footprint of `LispExp` down to 8 bytes by packing pointers and booleans inside the unused bits of an `f64` float.
 
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/gabrielpacheco23/haki/issues).
