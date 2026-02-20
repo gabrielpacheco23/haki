@@ -40,6 +40,7 @@ pub enum OpCode {
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: Vec<Value>,
+    pub lines: Vec<usize>,
 }
 
 impl Chunk {
@@ -47,6 +48,7 @@ impl Chunk {
         Chunk {
             code: vec![],
             constants: vec![],
+            lines: vec![],
         }
     }
 
@@ -74,11 +76,6 @@ pub struct CallFrame {
     pub ip: usize,
     pub env: Env,
 }
-
-// fn pop_float(stack: &mut Vec<LispExp>, heap: &Heap) -> Result<f64, String> {
-//     let val = stack.pop().ok_or("Empty stack")?;
-//     get_float(&val, heap)
-// }
 
 macro_rules! vm_math {
     ($op:tt, $self:ident) => {{

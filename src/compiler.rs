@@ -281,6 +281,12 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
                 return LispExp::List(vec);
             }
 
+            if let LispExp::Symbol(s) = &vec[0] {
+                if s == "quote" {
+                    return LispExp::List(vec);
+                }
+            }
+
             //  Otimiza os argumentos internos primeiro (Recursão Bottom-Up)
             let optimized_vec: Vec<LispExp> = vec.into_iter().map(optimize_ast).collect();
 
