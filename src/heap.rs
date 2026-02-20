@@ -125,7 +125,7 @@ impl Heap {
                 self.mark_val(*car);
                 self.mark_val(*cdr);
             }
-            LispExp::List(l) => {
+            LispExp::List(l, _) => {
                 for item in l {
                     self.mark_lisp_exp(item);
                 }

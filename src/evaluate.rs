@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     match exp {
-        LispExp::Symbol(s) => {
+        LispExp::Symbol(s, _) => {
             let val = env
                 .borrow()
                 .get(&s)
@@ -21,11 +21,11 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         LispExp::Native(_) => Ok(exp),
         LispExp::Lambda(_) => Ok(exp),
         LispExp::Macro(_) => Ok(exp),
-        LispExp::List(list) => {
+        LispExp::List(list, _) => {
             let (head, tail) = list.split_first().ok_or("Cannot evaluate empty list '()")?;
 
             match head {
-                LispExp::Symbol(s) if s == "if" => {
+                LispExp::Symbol(s, _) if s == "if" => {
                     if tail.len() != 3 {
                         return Err(
                             "'if' requires 3 arguments: (if condition then else)".to_string()
@@ -38,8 +38,8 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         _ => eval(tail[1].clone(), env, heap),
                     }
                 }
-                LispExp::Symbol(s) if s == "begin" => {
-                    let mut last_val = LispExp::List(vec![]);
+                LispExp::Symbol(s, _) if s == "begin" => {
+                    let mut last_val = LispExp::List(vec![], 0);
 
                     for exp in tail {
                         last_val = eval(exp.clone(), env, heap)?;
@@ -47,29 +47,29 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     Ok(last_val)
                 }
-                LispExp::Symbol(s) if s == "define" => {
+                LispExp::Symbol(s, _) if s == "define" => {
                     if tail.len() < 2 {
                         return Err("'define' requires arguments".to_string());
                     }
 
                     let (name, val) = match &tail[0] {
-                        LispExp::Symbol(s) => (s.clone(), eval(tail[1].clone(), env, heap)?),
-                        LispExp::List(def_header) => {
+                        LispExp::Symbol(s, _) => (s.clone(), eval(tail[1].clone(), env, heap)?),
+                        LispExp::List(def_header, _) => {
                             if def_header.is_empty() {
                                 return Err("Invalid procedure definition".to_string());
                             }
                             let func_name = match &def_header[0] {
-                                LispExp::Symbol(s) => s.clone(),
+                                LispExp::Symbol(s, _) => s.clone(),
                                 _ => return Err("Procedure name must be a symbol".to_string()),
                             };
 
-                            let params = LispExp::List(def_header[1..].to_vec());
+                            let params = LispExp::List(def_header[1..].to_vec(), 0);
 
                             let body_exps = &tail[1..];
                             let body = if body_exps.len() > 1 {
-                                let mut begin_vec = vec![LispExp::Symbol("begin".to_string())];
+                                let mut begin_vec = vec![LispExp::Symbol("begin".to_string(), 0)];
                                 begin_vec.extend_from_slice(body_exps);
-                                LispExp::List(begin_vec)
+                                LispExp::List(begin_vec, 0)
                             } else if body_exps.len() == 1 {
                                 body_exps[0].clone()
                             } else {
@@ -89,10 +89,9 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     let value_tag = ast_to_value(&val, heap);
                     env.borrow_mut().insert(name, value_tag);
-                    // env.borrow_mut().data.insert(name, val);
                     Ok(LispExp::Void)
                 }
-                LispExp::Symbol(s) if s == "lambda" => {
+                LispExp::Symbol(s, _) if s == "lambda" => {
                     if tail.len() != 2 {
                         return Err(
                             "lambda requires 2 arguments: (lambda (params) body)".to_string()
@@ -103,9 +102,9 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     let body_exps = &tail[1..];
                     let body = if body_exps.len() > 1 {
-                        let mut begin_vec = vec![LispExp::Symbol("begin".to_string())];
+                        let mut begin_vec = vec![LispExp::Symbol("begin".to_string(), 0)];
                         begin_vec.extend_from_slice(body_exps);
-                        LispExp::List(begin_vec)
+                        LispExp::List(begin_vec, 0)
                     } else {
                         body_exps[0].clone()
                     };
@@ -116,20 +115,20 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         env: env.clone(),
                     }))
                 }
-                LispExp::Symbol(s) if s == "defmacro" => {
+                LispExp::Symbol(s, _) if s == "defmacro" => {
                     let head_def = match &tail[0] {
-                        LispExp::List(l) if !l.is_empty() => l,
+                        LispExp::List(l, _) if !l.is_empty() => l,
                         _ => return Err("defmacro requires (name params...)".to_string()),
                     };
 
                     let macro_name = match &head_def[0] {
-                        LispExp::Symbol(s) => s.clone(),
+                        LispExp::Symbol(s, _) => s.clone(),
                         _ => {
                             return Err("Macro name must be a symbol".to_string());
                         }
                     };
 
-                    let params = Rc::new(LispExp::List(head_def[1..].to_vec()));
+                    let params = Rc::new(LispExp::List(head_def[1..].to_vec(), 0));
                     let body = Rc::new(tail[1].clone());
 
                     let macro_exp = LispExp::Macro(LispLambda {
@@ -142,13 +141,13 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         .insert(macro_name, ast_to_value(&macro_exp, heap));
                     Ok(LispExp::Void)
                 }
-                LispExp::Symbol(s) if s == "set!" => {
+                LispExp::Symbol(s, _) if s == "set!" => {
                     if tail.len() != 2 {
                         return Err("set! requires 2 arguments: (set! var val)".to_string());
                     }
 
                     let var_name = match &tail[0] {
-                        LispExp::Symbol(s) => s,
+                        LispExp::Symbol(s, _) => s,
                         _ => {
                             return Err("First argument of 'set!' must be a symbol".to_string());
                         }
@@ -161,14 +160,14 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                     Ok(LispExp::Void)
                 }
 
-                LispExp::Symbol(s) if s == "quote" => {
+                LispExp::Symbol(s, _) if s == "quote" => {
                     if tail.len() != 1 {
                         return Err("'quote' requires 1 argument".to_string());
                     }
 
                     Ok(tail[0].clone())
                 }
-                LispExp::Symbol(s) if s == "quasiquote" => {
+                LispExp::Symbol(s, _) if s == "quasiquote" => {
                     if tail.len() != 1 {
                         return Err("'quasiquote' requires 1 argument".to_string());
                     }
@@ -197,7 +196,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
             }
         }
         LispExp::Void => Ok(LispExp::Void),
-        LispExp::Nil => Ok(LispExp::List(vec![])),
+        LispExp::Nil => Ok(LispExp::List(vec![], 0)),
         LispExp::Pair(_, _) => {
             let ast_list = pairs_to_vec(&exp, heap);
             let expanded_ast = expand_macros(ast_list, env, heap)?;

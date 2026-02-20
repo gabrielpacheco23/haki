@@ -18,7 +18,7 @@ pub fn compile(
     let comparison_operators = ["<", ">", "=", "<=", ">="];
 
     match exp {
-        LispExp::Symbol(s) => {
+        LispExp::Symbol(s, _) => {
             chunk.code.push(OpCode::GetVar(s.clone()));
             if is_tail {
                 chunk.code.push(OpCode::Return);
@@ -41,7 +41,6 @@ pub fn compile(
             }
         }
         LispExp::Str(s) => {
-            // let val = heap.alloc(LispExp::Str(s.clone()));
             let val = heap.alloc_string(s.clone());
             let idx = chunk.add_constant(val);
             chunk.code.push(OpCode::Constant(idx));
@@ -60,15 +59,15 @@ pub fn compile(
         }
         LispExp::Pair(_, _) => {
             let ast_vec = pairs_to_vec(exp, heap);
-            compile(&LispExp::List(vec![ast_vec]), chunk, is_tail, heap)?
+            compile(&LispExp::List(vec![ast_vec], 0), chunk, is_tail, heap)?
         }
-        LispExp::List(list) => {
+        LispExp::List(list, _) => {
             if list.is_empty() {
                 return Ok(());
             }
             let head = &list[0];
             match head {
-                LispExp::Symbol(s) if s == "quote" => {
+                LispExp::Symbol(s, _) if s == "quote" => {
                     if list.len() != 2 {
                         return Err("quote requires 1 argument".to_string());
                     }
@@ -80,12 +79,12 @@ pub fn compile(
                         chunk.code.push(OpCode::Return);
                     }
                 }
-                LispExp::Symbol(s) if s == "set!" => {
+                LispExp::Symbol(s, _) if s == "set!" => {
                     if list.len() != 3 {
                         return Err("'set!' requires a variable and value".to_string());
                     }
                     match &list[1] {
-                        LispExp::Symbol(name) => {
+                        LispExp::Symbol(name, _) => {
                             compile(&list[2], chunk, false, heap)?;
                             chunk.code.push(OpCode::SetVar(name.clone()));
                             if is_tail {
@@ -95,20 +94,20 @@ pub fn compile(
                         _ => return Err("Invalid set!".to_string()),
                     }
                 }
-                LispExp::Symbol(s) if s == "define" => match &list[1] {
-                    LispExp::Symbol(name) => {
+                LispExp::Symbol(s, _) if s == "define" => match &list[1] {
+                    LispExp::Symbol(name, _) => {
                         compile(&list[2], chunk, false, heap)?;
                         chunk.code.push(OpCode::DefVar(name.clone()));
                         if is_tail {
                             chunk.code.push(OpCode::Return);
                         }
                     }
-                    LispExp::List(header) if !header.is_empty() => {
+                    LispExp::List(header, _) if !header.is_empty() => {
                         // syntatic sugar
-                        if let LispExp::Symbol(name) = &header[0] {
+                        if let LispExp::Symbol(name, _) = &header[0] {
                             let mut params = vec![];
                             for p in &header[1..] {
-                                if let LispExp::Symbol(p_name) = p {
+                                if let LispExp::Symbol(p_name, _) = p {
                                     params.push(p_name.clone());
                                 }
                             }
@@ -134,7 +133,7 @@ pub fn compile(
                     }
                     _ => return Err("Invalid define".to_string()),
                 },
-                LispExp::Symbol(s) if aritmethic_operators.contains(&s.as_str()) => {
+                LispExp::Symbol(s, _) if aritmethic_operators.contains(&s.as_str()) => {
                     if list.len() < 3 {
                         return Err(format!("{} requires arguments", s));
                     }
@@ -155,7 +154,7 @@ pub fn compile(
                         chunk.code.push(OpCode::Return);
                     }
                 }
-                LispExp::Symbol(s) if comparison_operators.contains(&s.as_str()) => {
+                LispExp::Symbol(s, _) if comparison_operators.contains(&s.as_str()) => {
                     let arg_count = list.len() - 1;
                     if arg_count < 2 {
                         return Err(format!("{} requires at least 2 arguments", s));
@@ -177,7 +176,7 @@ pub fn compile(
                         chunk.code.push(OpCode::Return);
                     }
                 }
-                LispExp::Symbol(s) if ["car", "cdr", "cons"].contains(&s.as_str()) => {
+                LispExp::Symbol(s, _) if ["car", "cdr", "cons"].contains(&s.as_str()) => {
                     if (s == "car" || s == "cdr") && list.len() != 2 {
                         return Err(format!("{} requires 1 argument", s));
                     }
@@ -200,7 +199,7 @@ pub fn compile(
                         chunk.code.push(OpCode::Return);
                     }
                 }
-                LispExp::Symbol(s) if s == "if" => {
+                LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap)?; // condition
 
                     let jump_if_false_idx = chunk.code.len();
@@ -226,11 +225,11 @@ pub fn compile(
                         chunk.code[jump_idx] = OpCode::Jump(chunk.code.len());
                     }
                 }
-                LispExp::Symbol(s) if s == "lambda" || s == "λ" => {
+                LispExp::Symbol(s, _) if s == "lambda" || s == "λ" => {
                     let mut params = vec![];
-                    if let LispExp::List(p_list) = &list[1] {
+                    if let LispExp::List(p_list, _) = &list[1] {
                         for p in p_list {
-                            if let LispExp::Symbol(name) = p {
+                            if let LispExp::Symbol(name, _) = p {
                                 params.push(name.clone());
                             }
                         }
@@ -276,14 +275,14 @@ pub fn compile(
 
 pub fn optimize_ast(ast: LispExp) -> LispExp {
     match ast {
-        LispExp::List(vec) => {
+        LispExp::List(vec, _) => {
             if vec.is_empty() {
-                return LispExp::List(vec);
+                return LispExp::List(vec, 0);
             }
 
-            if let LispExp::Symbol(s) = &vec[0] {
+            if let LispExp::Symbol(s, _) = &vec[0] {
                 if s == "quote" {
-                    return LispExp::List(vec);
+                    return LispExp::List(vec, 0);
                 }
             }
 
@@ -291,7 +290,7 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
             let optimized_vec: Vec<LispExp> = vec.into_iter().map(optimize_ast).collect();
 
             //  Tenta fazer o "Folding"
-            if let LispExp::Symbol(op) = &optimized_vec[0] {
+            if let LispExp::Symbol(op, _) = &optimized_vec[0] {
                 // Checa se é um operador matemático puro
                 if ["+", "-", "*", "/"].contains(&op.as_str()) {
                     // Verifica se TODOS os argumentos depois do operador são números
@@ -345,7 +344,7 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
                 }
             }
 
-            LispExp::List(optimized_vec)
+            LispExp::List(optimized_vec, 0)
         }
 
         _ => ast,

@@ -120,7 +120,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             if args[0].is_gc_ref() {
                 match h.get(args[0]) {
                     Some(LispExp::Pair(car, _cdr)) => return Ok(*car),
-                    Some(LispExp::List(vec)) => {
+                    Some(LispExp::List(vec, _)) => {
                         let vec_clone = vec.clone();
                         if vec_clone.is_empty() {
                             return Err("car: empty list".to_string());
@@ -141,11 +141,11 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             if args[0].is_gc_ref() {
                 match heap.get(args[0]) {
                     Some(LispExp::Pair(_car, cdr)) => return Ok(*cdr),
-                    Some(LispExp::List(vec)) => {
+                    Some(LispExp::List(vec, _)) => {
                         if vec.is_empty() {
                             return Err("cdr: empty list".to_string());
                         }
-                        let rest = LispExp::List(vec[1..].to_vec());
+                        let rest = LispExp::List(vec[1..].to_vec(), 0);
                         return Ok(crate::helpers::ast_to_value(&rest, heap));
                     }
                     _ => {}
@@ -168,7 +168,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 return true;
             }
             if v.is_gc_ref() {
-                if let Some(LispExp::List(l)) = h.get(*v) {
+                if let Some(LispExp::List(l, _)) = h.get(*v) {
                     return l.is_empty();
                 }
             }
@@ -178,31 +178,12 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             if v.is_gc_ref() {
                 match h.get(*v) {
                     Some(LispExp::Pair(_, _)) => return true,
-                    Some(LispExp::List(l)) => return !l.is_empty(),
+                    Some(LispExp::List(l, _)) => return !l.is_empty(),
                     _ => return false,
                 }
             }
             false
         });
-
-        // add_native!(env, heap, "list?", |args, _, heap| {
-        //     if args.len() != 1 {
-        //         return Err("'list?' requires 1 argument".to_string());
-        //     }
-        //     let mut current = args[0];
-        //     loop {
-        //         if current.is_nil() {
-        //             return Ok(Value::boolean(true));
-        //         }
-        //         if current.is_gc_ref() {
-        //             if let Some(LispExp::Pair(_, cdr)) = heap.get(current) {
-        //                 current = *cdr;
-        //                 continue;
-        //             }
-        //         }
-        //         return Ok(Value::boolean(false));
-        //     }
-        // });
 
         add_native!(env, heap, "list?", |args, _, heap| {
             if args.len() != 1 {
@@ -211,7 +192,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let mut current = args[0];
 
             if current.is_gc_ref() {
-                if let Some(LispExp::List(_)) = heap.get(current) {
+                if let Some(LispExp::List(_, _)) = heap.get(current) {
                     return Ok(Value::boolean(true));
                 }
             }
@@ -242,7 +223,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             v.is_gc_ref() && matches!(h.get(*v), Some(LispExp::Str(_)))
         });
         def_is!(env, heap, "symbol?", |v: &Value, h: &mut Heap| {
-            v.is_gc_ref() && matches!(h.get(*v), Some(LispExp::Symbol(_)))
+            v.is_gc_ref() && matches!(h.get(*v), Some(LispExp::Symbol(_, _)))
         });
 
         def_is!(env, heap, "procedure?", |v: &Value, h: &mut Heap| {
@@ -642,9 +623,9 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                     "<void>"
                 } else if val.is_gc_ref() {
                     match heap.get(*val) {
-                        Some(LispExp::Symbol(_)) => "symbol",
+                        Some(LispExp::Symbol(_, _)) => "symbol",
                         Some(LispExp::Str(_)) => "string",
-                        Some(LispExp::List(_)) => "list",
+                        Some(LispExp::List(_, _)) => "list",
                         Some(LispExp::Pair(_, _)) => "pair",
                         Some(LispExp::Native(_))
                         | Some(LispExp::Lambda(_))
@@ -738,12 +719,12 @@ pub fn standard_env(heap: &mut Heap) -> Env {
 
         add_native!(env, heap, "hash-set!", |args, _, heap| {
             if args.len() == 3 && args[0].is_gc_ref() && args[1].is_gc_ref() {
-                let key_str = if let Some(LispExp::Str(s) | LispExp::Symbol(s)) = heap.get(args[1])
-                {
-                    s.clone()
-                } else {
-                    return Err("Invalid key".to_string());
-                };
+                let key_str =
+                    if let Some(LispExp::Str(s) | LispExp::Symbol(s, _)) = heap.get(args[1]) {
+                        s.clone()
+                    } else {
+                        return Err("Invalid key".to_string());
+                    };
                 let val = args[2];
                 if let Some(LispExp::HashMap(map)) = heap.get_mut(args[0]) {
                     map.insert(key_str, val);
@@ -755,12 +736,12 @@ pub fn standard_env(heap: &mut Heap) -> Env {
 
         add_native!(env, heap, "hash-ref", |args, _, heap| {
             if args.len() == 2 && args[0].is_gc_ref() && args[1].is_gc_ref() {
-                let key_str = if let Some(LispExp::Str(s) | LispExp::Symbol(s)) = heap.get(args[1])
-                {
-                    s.clone()
-                } else {
-                    return Err("Invalid key".to_string());
-                };
+                let key_str =
+                    if let Some(LispExp::Str(s) | LispExp::Symbol(s, _)) = heap.get(args[1]) {
+                        s.clone()
+                    } else {
+                        return Err("Invalid key".to_string());
+                    };
                 if let Some(LispExp::HashMap(map)) = heap.get(args[0]) {
                     return Ok(map.get(&key_str).copied().unwrap_or(Value::nil()));
                 }
@@ -792,12 +773,12 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let mut map = RustHashMap::new();
             let mut i = 0;
             while i + 1 < args.len() {
-                let key_str = if let Some(LispExp::Str(s) | LispExp::Symbol(s)) = heap.get(args[i])
-                {
-                    s.clone()
-                } else {
-                    return Err("Invalid key".to_string());
-                };
+                let key_str =
+                    if let Some(LispExp::Str(s) | LispExp::Symbol(s, _)) = heap.get(args[i]) {
+                        s.clone()
+                    } else {
+                        return Err("Invalid key".to_string());
+                    };
                 map.insert(key_str, args[i + 1]);
                 i += 2;
             }

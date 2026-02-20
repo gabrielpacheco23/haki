@@ -280,7 +280,7 @@ impl Vm {
                                 self.stack.push(*car);
                                 continue;
                             }
-                            Some(LispExp::List(vec)) => {
+                            Some(LispExp::List(vec, _)) => {
                                 let vec = vec.clone();
                                 if vec.is_empty() {
                                     return Err("car: empty list".to_string());
@@ -302,11 +302,11 @@ impl Vm {
                                 self.stack.push(*cdr);
                                 continue;
                             }
-                            Some(LispExp::List(vec)) => {
+                            Some(LispExp::List(vec, _)) => {
                                 if vec.is_empty() {
                                     return Err("cdr: empty list".to_string());
                                 }
-                                let rest = LispExp::List(vec[1..].to_vec());
+                                let rest = LispExp::List(vec[1..].to_vec(), 0);
                                 self.stack.push(ast_to_value(&rest, heap));
                                 continue;
                             }

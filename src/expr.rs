@@ -18,13 +18,13 @@ pub struct LispLambda {
 // Atom = Symbol or Number
 #[derive(Clone)]
 pub enum LispExp {
-    Symbol(String),
+    Symbol(String, usize),
     Number(f64),
     Bool(bool),
     Str(String),
     Nil,
     Void,
-    List(Vec<LispExp>),
+    List(Vec<LispExp>, usize),
     Native(LispNative),
     Lambda(LispLambda),
     Macro(LispLambda),
@@ -54,7 +54,7 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
         match self.exp {
             LispExp::Number(n) => write!(f, "{}", n),
             LispExp::Str(s) => write!(f, "{}", s),
-            LispExp::Symbol(s) => write!(f, "{}", s),
+            LispExp::Symbol(s, _) => write!(f, "{}", s),
             LispExp::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
             LispExp::Nil => write!(f, "()"),
             LispExp::Void => write!(f, ""),
@@ -62,7 +62,7 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
                 write!(f, "<procedure>")
             }
 
-            LispExp::List(vec) => {
+            LispExp::List(vec, _) => {
                 write!(f, "(")?;
                 for (i, item) in vec.iter().enumerate() {
                     if i > 0 {
@@ -190,12 +190,12 @@ impl fmt::Debug for LispExp {
 impl PartialEq for LispExp {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (LispExp::Symbol(a), LispExp::Symbol(b)) => a == b,
+            (LispExp::Symbol(a, _), LispExp::Symbol(b, _)) => a == b,
             (LispExp::Str(a), LispExp::Str(b)) => a == b,
             (LispExp::Number(a), LispExp::Number(b)) => a == b,
             (LispExp::Bool(a), LispExp::Bool(b)) => a == b,
 
-            (LispExp::List(a), LispExp::List(b)) => a == b,
+            (LispExp::List(a, _), LispExp::List(b, _)) => a == b,
             (LispExp::Vector(a), LispExp::Vector(b)) => a == b,
             (LispExp::HashMap(a), LispExp::HashMap(b)) => a == b,
             (LispExp::Native(a), LispExp::Native(b)) => Rc::ptr_eq(a, b),
@@ -230,7 +230,7 @@ pub fn is_deep_equal(a: Value, b: Value, heap: &Heap) -> bool {
         if let (Some(ea), Some(eb)) = (heap.get(a), heap.get(b)) {
             match (ea, eb) {
                 (Str(s1), Str(s2)) => s1 == s2,
-                (Symbol(s1), Symbol(s2)) => s1 == s2,
+                (Symbol(s1, _), Symbol(s2, _)) => s1 == s2,
                 (Pair(car1, cdr1), Pair(car2, cdr2)) => {
                     is_deep_equal(*car1, *car2, heap) && is_deep_equal(*cdr1, *cdr2, heap)
                 }
