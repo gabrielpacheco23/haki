@@ -1,13 +1,11 @@
 use crate::env::Env;
 use crate::heap::Heap;
+use crate::value::Value;
 use crate::vm::Chunk;
 
 use std::collections::HashMap as RustHashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GcRef(pub usize);
-
-pub type LispNative = Rc<dyn Fn(&[LispExp], &mut Env, &mut Heap) -> Result<LispExp, String>>;
+pub type LispNative = Rc<dyn Fn(&[Value], &mut Env, &mut Heap) -> Result<Value, String>>;
 
 #[derive(Clone, Debug)]
 pub struct LispLambda {
@@ -24,16 +22,15 @@ pub enum LispExp {
     Bool(bool),
     Str(String),
     Nil,
+    Void,
     List(Vec<LispExp>),
     Native(LispNative),
     Lambda(LispLambda),
     Macro(LispLambda),
-    Void,
-    Pair(GcRef, GcRef),
-    Vector(GcRef),
-    HashMap(GcRef),
-    VectorData(Vec<LispExp>),
-    HashMapData(RustHashMap<String, LispExp>),
+    Pair(Value, Value),
+    HeapPtr(Value),
+    Vector(Vec<Value>),
+    HashMap(RustHashMap<String, Value>),
     VmClosure {
         params: Vec<String>,
         chunk: Rc<Chunk>,
@@ -44,86 +41,91 @@ pub enum LispExp {
 use std::rc::Rc;
 
 pub struct LispFmt<'a> {
-    pub exp: &'a LispExp,
+    pub val: Value,
     pub heap: &'a Heap,
 }
 
-pub fn lisp_fmt<'a>(exp: &'a LispExp, heap: &'a Heap) -> LispFmt<'a> {
-    LispFmt { exp, heap }
+pub fn lisp_fmt<'a>(val: Value, heap: &'a Heap) -> LispFmt<'a> {
+    LispFmt { val, heap }
 }
 
 impl<'a> std::fmt::Display for LispFmt<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.exp {
-            LispExp::Number(n) => write!(f, "{}", n),
-            // LispExp::Str(s) => write!(f, "\"{}\"", s),
-            LispExp::Str(s) => write!(f, "{}", s),
-            LispExp::Symbol(s) => write!(f, "{}", s),
-            LispExp::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
-            LispExp::Nil => write!(f, "()"),
-            LispExp::Void => write!(f, ""),
-            LispExp::Pair(car, cdr) => {
-                write!(f, "(")?;
+        let v = self.val;
 
-                let car_val = self.heap.get(*car).unwrap();
-                write!(f, "{}", lisp_fmt(&car_val, self.heap))?;
-
-                let mut current = *cdr;
-                while let Some(LispExp::Pair(next_car, next_cdr)) = self.heap.get(current) {
-                    let next_car_val = self.heap.get(*next_car).unwrap();
-                    write!(f, " {}", lisp_fmt(&next_car_val, self.heap))?;
-                    current = *next_cdr;
-                }
-
-                if let Some(LispExp::Nil) = self.heap.get(current) {
-                    write!(f, ")")
-                } else {
-                    let last_val = self.heap.get(current).unwrap();
-                    write!(f, " . {})", lisp_fmt(&last_val, self.heap))
-                }
-            }
-
-            LispExp::Vector(vec_ref) => {
-                if let Some(LispExp::VectorData(data)) = self.heap.get(*vec_ref) {
-                    write!(f, "[")?;
-                    for (i, item) in data.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, " ")?;
-                        }
-                        write!(f, "{}", lisp_fmt(&item, self.heap))?;
+        if v.is_number() {
+            write!(f, "{}", v.as_number())
+        } else if v.is_boolean() {
+            write!(f, "{}", if v.as_boolean() { "#t" } else { "#f" })
+        } else if v.is_nil() {
+            write!(f, "()")
+        } else if v.is_void() {
+            write!(f, "")
+        } else if v.is_gc_ref() {
+            if let Some(exp) = self.heap.get(v) {
+                match exp {
+                    LispExp::Str(s) => write!(f, "{}", s),
+                    LispExp::Symbol(s) => write!(f, "{}", s),
+                    LispExp::Native(_) | LispExp::Lambda(_) | LispExp::VmClosure { .. } => {
+                        write!(f, "<procedure>")
                     }
-                    write!(f, "]")
-                } else {
-                    write!(f, "<invalid-vector-ref>")
-                }
-            }
 
-            LispExp::HashMap(map_ref) => {
-                if let Some(LispExp::HashMapData(data)) = self.heap.get(*map_ref) {
-                    write!(f, "{} ", '{')?;
-                    for (i, item) in data.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, " ")?;
+                    LispExp::Pair(car, cdr) => {
+                        write!(f, "(")?;
+                        write!(f, "{}", lisp_fmt(*car, self.heap))?;
+                        let mut current = *cdr;
+                        loop {
+                            if current.is_nil() {
+                                write!(f, ")")?;
+                                break;
+                            }
+                            if !current.is_gc_ref() {
+                                write!(f, " . {}", lisp_fmt(current, self.heap))?;
+                                write!(f, ")")?;
+                                break;
+                            }
+
+                            if let Some(LispExp::Pair(next_car, next_cdr)) = self.heap.get(current)
+                            {
+                                write!(f, " {}", lisp_fmt(*next_car, self.heap))?;
+                                current = *next_cdr;
+                            } else {
+                                write!(f, " . {}", lisp_fmt(current, self.heap))?;
+                                write!(f, ")")?;
+                                break;
+                            }
                         }
-                        write!(
-                            f,
-                            "{}: ",
-                            lisp_fmt(&LispExp::Str(item.0.clone()), self.heap)
-                        )?;
-                        write!(f, "{}", lisp_fmt(&item.1, self.heap))?;
-                        if i != data.len() - 1 {
-                            write!(f, ",")?;
-                        }
+                        Ok(())
                     }
-                    write!(f, " {}", '}')
-                } else {
-                    write!(f, "<invalid-hashmap-ref>")
-                }
-            }
 
-            LispExp::VectorData(_) => write!(f, "<vector-data>"),
-            LispExp::HashMapData(_) => write!(f, "<hashmap-data>"),
-            _ => write!(f, "<unknown>"),
+                    LispExp::Vector(vec) => {
+                        write!(f, "[")?;
+                        for (i, item) in vec.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, " ")?;
+                            }
+                            write!(f, "{}", lisp_fmt(*item, self.heap))?;
+                        }
+                        write!(f, "]")
+                    }
+
+                    LispExp::HashMap(map) => {
+                        write!(f, "{{ ")?;
+                        for (i, (k, val)) in map.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "\"{}\": {}", k, lisp_fmt(*val, self.heap))?;
+                        }
+                        write!(f, " }}")
+                    }
+                    _ => write!(f, "<unknown>"),
+                }
+            } else {
+                write!(f, "<nil>") // invalid pointer
+            }
+        } else {
+            write!(f, "<invalid-tag>")
         }
     }
 }
@@ -131,7 +133,8 @@ impl<'a> std::fmt::Display for LispFmt<'a> {
 use std::fmt;
 impl fmt::Debug for LispExp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", lisp_fmt(self, &Heap::new()))
+        // write!(f, "{}", lisp_fmt(self, &Heap::new()))
+        todo!()
     }
 }
 
@@ -167,79 +170,54 @@ impl PartialEq for LispExp {
     }
 }
 
-pub fn is_deep_equal(a: &LispExp, b: &LispExp, heap: &Heap) -> bool {
+pub fn is_deep_equal(a: Value, b: Value, heap: &Heap) -> bool {
     use LispExp::*;
-    match (a, b) {
-        (Number(n1), Number(n2)) => n1 == n2,
-        (Str(s1), Str(s2)) => s1 == s2,
-        (Symbol(s1), Symbol(s2)) => s1 == s2,
-        (Bool(b1), Bool(b2)) => b1 == b2,
-        (Nil, Nil) | (Void, Void) => true,
-        (Pair(car1, cdr1), Pair(car2, cdr2)) => {
-            let v_car1 = heap.get(*car1).unwrap();
-            let v_car2 = heap.get(*car2).unwrap();
 
-            if !is_deep_equal(v_car1, v_car2, heap) {
-                return false;
-            }
+    if a == b {
+        return true;
+    }
 
-            let v_cdr1 = heap.get(*cdr1).unwrap();
-            let v_cdr2 = heap.get(*cdr2).unwrap();
-
-            is_deep_equal(v_cdr1, v_cdr2, heap)
-        }
-
-        (Vector(ref1), Vector(ref2)) => {
-            if ref1 == ref2 {
-                return true;
-            }
-
-            if let (Some(VectorData(vec1)), Some(VectorData(vec2))) =
-                (heap.get(*ref1), heap.get(*ref2))
-            {
-                if vec1.len() != vec2.len() {
-                    return false;
+    if a.is_gc_ref() && b.is_gc_ref() {
+        if let (Some(ea), Some(eb)) = (heap.get(a), heap.get(b)) {
+            match (ea, eb) {
+                (Str(s1), Str(s2)) => s1 == s2,
+                (Symbol(s1), Symbol(s2)) => s1 == s2,
+                (Pair(car1, cdr1), Pair(car2, cdr2)) => {
+                    is_deep_equal(*car1, *car2, heap) && is_deep_equal(*cdr1, *cdr2, heap)
                 }
-
-                for (i, j) in vec1.iter().zip(vec2.iter()) {
-                    if !is_deep_equal(i, j, heap) {
+                (Vector(v1), Vector(v2)) => {
+                    if v1.len() != v2.len() {
                         return false;
                     }
-                }
-                true
-            } else {
-                false
-            }
-        }
-
-        (HashMap(ref1), HashMap(ref2)) => {
-            if ref1 == ref2 {
-                return true;
-            }
-
-            if let (Some(HashMapData(map1)), Some(HashMapData(map2))) =
-                (heap.get(*ref1), heap.get(*ref2))
-            {
-                if map1.len() != map2.len() {
-                    return false;
-                }
-
-                for (key, val1) in map1.iter() {
-                    match map2.get(key) {
-                        Some(val2) => {
-                            if !is_deep_equal(val1, val2, heap) {
-                                return false;
-                            }
+                    for (i1, i2) in v1.iter().zip(v2.iter()) {
+                        if !is_deep_equal(*i1, *i2, heap) {
+                            return false;
                         }
-                        None => return false,
                     }
+                    true
                 }
-                true
-            } else {
-                false
+                (HashMap(m1), HashMap(m2)) => {
+                    if m1.len() != m2.len() {
+                        return false;
+                    }
+                    for (k, v1) in m1.iter() {
+                        match m2.get(k) {
+                            Some(v2) => {
+                                if !is_deep_equal(*v1, *v2, heap) {
+                                    return false;
+                                }
+                            }
+                            None => return false,
+                        }
+                    }
+                    true
+                }
+                _ => false,
             }
+        } else {
+            false
         }
-
-        _ => false,
+    } else {
+        false
     }
 }

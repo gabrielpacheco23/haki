@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::eval;
 use crate::heap::Heap;
+use crate::value::Value;
 use crate::vm::Vm;
 use crate::{
     env::{Env, LispEnv},
@@ -7,11 +11,55 @@ use crate::{
 };
 
 // Helper para converter qualquer número Lisp para f64
-pub fn get_float(exp: &LispExp, heap: &Heap) -> Result<f64, String> {
-    match exp {
-        LispExp::Number(f) => Ok(*f),
-        _ => Err(format!("Expected a number, got: {}", lisp_fmt(&exp, heap))),
-    }
+// pub fn get_float(exp: &LispExp, heap: &Heap) -> Result<f64, String> {
+//     match exp {
+//         LispExp::Number(f) => Ok(*f),
+//         _ => Err(format!(
+//             "Expected a number, got: {}",
+//             lisp_fmt(ast_to_value(&exp, &mut heap), heap)
+//         )),
+//     }
+// }
+
+#[macro_export]
+macro_rules! arithmetic_op {
+    ($env:ident, $heap:ident, $name:expr, $init:expr, $op:tt) => {
+        add_native!($env, $heap, $name, |args, _env, _heap| {
+            if args.is_empty() { return Ok(Value::number($init)); }
+            if !args[0].is_number() { return Err(format!("'{}' requires numbers", $name)); }
+            let mut result = args[0].as_number();
+
+            if args.len() == 1 {
+                if $name == "-" { result = -result; }
+                else if $name == "/" { result = 1.0 / result; }
+            } else {
+                for arg in args.iter().skip(1) {
+                    if !arg.is_number() { return Err(format!("'{}' requires numbers", $name)); }
+                    result = result $op arg.as_number();
+                }
+            }
+            Ok(Value::number(result))
+        });
+    };
+}
+
+#[macro_export]
+macro_rules! compare_op {
+    ($env:ident, $heap:ident, $name:expr, $op:tt) => {
+        add_native!($env, $heap, $name, |args, _env, _heap| {
+            if args.len() < 2 { return Err(format!("'{}' requires at least 2 numbers", $name)); }
+
+            for window in args.windows(2) {
+                if !window[0].is_number() || !window[1].is_number() {
+                    return Err(format!("'{}' requires numbers", $name));
+                }
+                if !(window[0].as_number() $op window[1].as_number()) {
+                    return Ok(Value::boolean(false));
+                }
+            }
+            Ok(Value::boolean(true))
+        });
+    };
 }
 
 #[macro_export]
@@ -37,99 +85,99 @@ macro_rules! ensure_tonicity {
 // Macro para funções matemáticas de 1 argumento (sin, cos, sqrt)
 #[macro_export]
 macro_rules! def_math {
-    ($func:expr) => {
-        Rc::new(
-            move |args: &[LispExp], _env, heap| -> Result<LispExp, String> {
-                if args.len() != 1 {
-                    return Err("This procedure requires exactly 1 argument".to_string());
-                }
-                let val = get_float(&args[0], &heap)?;
-                Ok(LispExp::Number($func(val)))
-            },
-        )
+    ($env:ident, $heap:ident, $name:expr, $method:ident) => {
+        add_native!($env, $heap, $name, |args, _env, _heap| {
+            if args.len() != 1 {
+                return Err(format!("'{}' exige exatamente 1 argumento.", $name));
+            }
+            if !args[0].is_number() {
+                return Err(format!("'{}' exige um número.", $name));
+            }
+            // Chama o método f64 do Rust (ex: args[0].as_number().sqrt()) e empacota de volta
+            let result = args[0].as_number().$method();
+            Ok(Value::number(result))
+        });
     };
 }
 
-#[macro_export]
-macro_rules! def_cmp {
-    ($op:tt) => {
-        LispExp::Native(Rc::new(move |args: &[LispExp], _env: &mut Env, heap| -> Result<LispExp, String> {
-            let floats: Result<Vec<f64>, String> = args.iter().map(|x| get_float(x, &heap)).collect();
-            let floats = floats?;
+// #[macro_export]
+// macro_rules! def_cmp {
+//     ($op:tt) => {
+//         LispExp::Native(Rc::new(move |args: &[LispExp], _env: &mut Env, heap| -> Result<LispExp, String> {
+//             let floats: Result<Vec<f64>, String> = args.iter().map(|x| get_float(x, &heap)).collect();
+//             let floats = floats?;
 
-            if floats.len() < 2 {
-                return Ok(LispExp::Bool(true));
-            }
+//             if floats.len() < 2 {
+//                 return Ok(LispExp::Bool(true));
+//             }
 
-            for pair in floats.windows(2) {
-                let prev = pair[0];
-                let curr = pair[1];
+//             for pair in floats.windows(2) {
+//                 let prev = pair[0];
+//                 let curr = pair[1];
 
-                if !(prev $op curr) {
-                    return Ok(LispExp::Bool(false));
-                }
-            }
+//                 if !(prev $op curr) {
+//                     return Ok(LispExp::Bool(false));
+//                 }
+//             }
 
-            Ok(LispExp::Bool(true))
-        }))
-    };
-}
+//             Ok(LispExp::Bool(true))
+//         }))
+//     };
+// }
 
 // Macro para operações de "Fold" (Redução) (+, *, min, max)
 // Recebe um valor inicial e uma função de acumulação
 #[macro_export]
 macro_rules! def_fold {
-    ($initial:expr, $op:expr) => {
-        Rc::new(
-            move |args: &[LispExp], _env, heap| -> Result<LispExp, String> {
-                let mut acc = $initial;
-                for (i, arg) in args.iter().enumerate() {
-                    let val = get_float(arg, &heap)?;
-                    if i == 0 && args.len() == 1 && $initial == 0.0 {
-                        // Caso especial: (+ 5) ou (min 5) -> retorna 5
-                        acc = val;
-                    } else if i == 0 {
-                        // Se for o primeiro item, inicializamos o acumulador com ele
-                        // (para min/max isso é importante, para + nem tanto)
-                        acc = match $op(acc, val) {
-                            // Truque para min/max funcionarem com o primeiro elemento
-                            _ if $initial == f64::INFINITY || $initial == f64::NEG_INFINITY => val,
-                            res => res,
-                        };
-                    } else {
-                        acc = $op(acc, val);
-                    }
-                }
-                Ok(LispExp::Number(acc))
-            },
-        )
+    ($env:ident, $heap:ident, $name:expr, $init:expr, $fold_op:expr) => {
+        add_native!($env, $heap, $name, |args, _env, h| {
+            if args.is_empty() {
+                return Ok($init);
+            }
+
+            let mut acc = args[0];
+
+            for arg in args.iter().skip(1) {
+                acc = $fold_op(acc, *arg, &mut *h)?;
+            }
+
+            Ok(acc)
+        });
+    };
+}
+
+// MACRO: Redutor que exige pelo menos 1 argumento (ideal para min/max)
+#[macro_export]
+macro_rules! def_fold1 {
+    ($env:ident, $heap:ident, $name:expr, $fold_op:expr) => {
+        add_native!($env, $heap, $name, |args, _env, h| {
+            // A diferença está aqui: barramos listas vazias!
+            if args.is_empty() {
+                return Err(format!("'{}' exige pelo menos 1 argumento.", $name));
+            }
+
+            let mut acc = args[0];
+
+            for arg in args.iter().skip(1) {
+                acc = $fold_op(acc, *arg, &mut *h)?;
+            }
+
+            Ok(acc)
+        });
     };
 }
 
 #[macro_export]
 macro_rules! def_is {
-    // $pattern: O padrão do match (ex: LispExp::List(_))
-    ($pattern:pat) => {
-        Rc::new(|args: &[LispExp], _env, _| -> Result<LispExp, String> {
+    ($env:ident, $heap:ident, $name:expr, $check:expr) => {
+        add_native!($env, $heap, $name, |args, _env, heap| {
             if args.len() != 1 {
-                return Err("Type check requires exactly 1 argument".to_string());
+                return Err(format!("'{}' exige exatamente 1 argumento.", $name));
             }
-            let res = matches!(&args[0], $pattern);
-            Ok(LispExp::Bool(res))
-        })
-    };
-    // Variante especial para validações mais complexas (ex: null?)
-    ($pattern:pat if $guard:expr) => {
-        Rc::new(|args: &[LispExp], _env| -> Result<LispExp, String> {
-            if args.len() != 1 {
-                return Err("Type check requires exactly 1 argument".to_string());
-            }
-            let res = match &args[0] {
-                $pattern if $guard => true,
-                _ => false,
-            };
-            Ok(LispExp::Bool(res))
-        })
+            // Executa a lógica do closure passado na macro
+            let is_true = $check(&args[0], heap);
+            Ok(Value::boolean(is_true))
+        });
     };
 }
 
@@ -142,50 +190,41 @@ pub fn apply_macro(
     let mut expansion_env = LispEnv::new(Some(macro_def.env.clone()));
 
     if let LispExp::List(params) = &*macro_def.params {
-        // Verifica se o último parâmetro é "&rest"
         let has_varargs = params.len() >= 2
             && matches!(&params[params.len() - 2], LispExp::Symbol(s) if s == "&rest");
 
         if has_varargs {
-            // Verifica se tem o mínimo de argumentos necessários (antes do &rest)
             let fixed_params_count = params.len() - 2;
             if args.len() < fixed_params_count {
-                return Err("Insufficient arguments to variadic macro".to_string());
+                return Err("Insufficient arguments in variadic macro".to_string());
             }
 
-            // Bind dos argumentos fixos
             for i in 0..fixed_params_count {
                 if let LispExp::Symbol(name) = &params[i] {
-                    expansion_env
-                        .borrow_mut()
-                        .data
-                        .insert(name.clone(), args[i].clone());
+                    let arg_val = ast_to_value(&args[i], heap);
+                    expansion_env.borrow_mut().insert(name.clone(), arg_val);
                 }
             }
 
-            // Bind do resto! Pega todos os args que sobraram e coloca numa lista
             let vararg_name_exp = &params[params.len() - 1];
             if let LispExp::Symbol(name) = vararg_name_exp {
                 let rest_args = args[fixed_params_count..].to_vec();
-                expansion_env
-                    .borrow_mut()
-                    .data
-                    .insert(name.clone(), LispExp::List(rest_args));
+                let rest_list = LispExp::List(rest_args);
+                let rest_val = ast_to_value(&rest_list, heap);
+                expansion_env.borrow_mut().insert(name.clone(), rest_val);
             }
         } else {
             if params.len() != args.len() {
                 return Err(format!(
-                    "Macro expects {} arguments, but got {}",
+                    "Macro expects {} arguments, got {}",
                     params.len(),
                     args.len()
                 ));
             }
             for (param, arg) in params.iter().zip(args.iter()) {
                 if let LispExp::Symbol(name) = param {
-                    expansion_env
-                        .borrow_mut()
-                        .data
-                        .insert(name.clone(), arg.clone());
+                    let arg_val = ast_to_value(arg, heap);
+                    expansion_env.borrow_mut().insert(name.clone(), arg_val);
                 }
             }
         }
@@ -203,50 +242,17 @@ pub fn apply_procedure(
     heap: &mut Heap,
 ) -> Result<LispExp, String> {
     match proc {
-        LispExp::Native(f) => f(args, env, heap),
-        LispExp::Lambda(lambda) => {
-            let new_env = LispEnv::new(Some(lambda.env.clone()));
-
-            if let LispExp::List(params) = &*lambda.params {
-                if params.len() != args.len() {
-                    return Err(format!(
-                        "Expected {} arguments, but got {}",
-                        params.len(),
-                        args.len()
-                    ));
-                }
-                for (param, arg) in params.iter().zip(args.iter()) {
-                    if let LispExp::Symbol(name) = param {
-                        new_env.borrow_mut().data.insert(name.clone(), arg.clone());
-                    }
-                }
-            } else {
-                return Err("Invalid lambda parameters".to_string());
+        LispExp::Native(func) => {
+            let mut value_args = Vec::with_capacity(args.len());
+            for arg in args {
+                value_args.push(ast_to_value(arg, heap));
             }
 
-            eval((*lambda.body).clone(), &mut new_env.clone(), heap)
+            let mut temp_env = env.clone();
+            let result_val = func(&value_args, &mut temp_env, heap)?;
+            Ok(value_to_ast(result_val, heap))
         }
-        LispExp::VmClosure {
-            params,
-            chunk,
-            env: closure_env,
-        } => {
-            if args.len() != params.len() {
-                return Err("Incorrect arity".to_string());
-            }
-
-            let new_env = LispEnv::new(Some(closure_env.clone()));
-            for (param, arg) in params.iter().zip(args.iter()) {
-                new_env.borrow_mut().data.insert(param.clone(), arg.clone());
-            }
-
-            let mut sub_vm = Vm::new();
-            sub_vm.execute(chunk.clone(), new_env, heap)
-        }
-        _ => Err(format!(
-            "Object not callable using eval: {}",
-            lisp_fmt(&proc, &heap)
-        )),
+        _ => Err("Object is not callable".to_string()),
     }
 }
 
@@ -271,29 +277,6 @@ fn is_symbol(exp: &LispExp, name: &str) -> bool {
     matches!(exp, LispExp::Symbol(s) if s == name)
 }
 
-pub fn env_set(env: &Env, var: &str, val: LispExp) -> Result<(), String> {
-    // 1. Tenta encontrar e atualizar no escopo ATUAL
-    {
-        let mut env_ref = env.borrow_mut();
-        if env_ref.data.contains_key(var) {
-            env_ref.data.insert(var.to_string(), val);
-            return Ok(());
-        }
-    }
-
-    // 2. Se não achou, pega o ponteiro para o pai (se existir)
-    let outer = env.borrow().outer.clone();
-
-    // 3. Recursão no pai
-    match outer {
-        Some(parent_env) => env_set(&parent_env, var, val),
-        None => Err(format!(
-            "Error: Variable '{}' not defined. Use 'define' before 'set!'",
-            var
-        )),
-    }
-}
-
 pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     let ast = pairs_to_vec(&ast, heap);
 
@@ -304,18 +287,13 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
             }
 
             if let LispExp::Symbol(s) = &list[0] {
-                // Regra 0: defmacros
                 if s == "defmacro" {
                     eval(LispExp::List(list.clone()), env, heap)?;
                     return Ok(LispExp::Void);
                 }
-
-                // Regra 1: Não expandir o que está dentro de quote
                 if s == "quote" {
                     return Ok(LispExp::List(list.clone()));
                 }
-
-                // Regra 2: Proteger parametros do lambda
                 if s == "lambda" {
                     if list.len() < 3 {
                         return Err("Malformed lambda".to_string());
@@ -326,13 +304,10 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
                     }
                     return Ok(LispExp::List(new_list));
                 }
-
-                // Regra 3: Proteger nome da variavel no define
                 if s == "define" {
                     if list.len() < 3 {
                         return Err("Malformed define".to_string());
                     }
-
                     let mut new_list = vec![list[0].clone(), list[1].clone()];
                     for item in &list[2..] {
                         new_list.push(expand_macros(item.clone(), env, heap)?);
@@ -340,15 +315,12 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
                     return Ok(LispExp::List(new_list));
                 }
 
-                // Regra 4: É uma macro?
-                if let Some(macro_def) = find_macro(env, s) {
+                if let Some(macro_def) = find_macro(env, s, heap) {
                     let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
-
                     return expand_macros(expanded_ast, env, heap);
                 }
             }
 
-            // Regra 5: Chamada de função normal
             let mut new_list = vec![];
             for item in list {
                 new_list.push(expand_macros(item, env, heap)?);
@@ -359,59 +331,89 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
     }
 }
 
-fn find_macro(env: &Env, name: &str) -> Option<LispLambda> {
+fn find_macro(env: &Env, name: &str, heap: &Heap) -> Option<LispLambda> {
     let env_ref = env.borrow();
 
-    if let Some(LispExp::Macro(m)) = env_ref.data.get(name) {
-        return Some(m.clone());
+    if let Some(val) = env_ref.get(name) {
+        if val.is_gc_ref() {
+            if let Some(LispExp::Macro(m)) = heap.get(val) {
+                return Some(m.clone());
+            }
+        }
     }
 
     if let Some(outer) = &env_ref.outer {
-        return find_macro(outer, name);
+        return find_macro(outer, name, heap);
     }
-
     None
 }
 
-pub fn pairs_to_vec(exp: &LispExp, heap: &mut Heap) -> LispExp {
+pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
     match exp {
-        LispExp::Pair(car, cdr) => {
+        LispExp::Pair(car_val, cdr_val) => {
             let mut vec = vec![];
+            vec.push(value_to_ast(*car_val, heap));
 
-            let car_val = heap.get(*car).unwrap().clone();
-            vec.push(pairs_to_vec(&car_val, heap));
-
-            let mut curr_ref = *cdr;
-
-            while let Some(LispExp::Pair(next_car, next_cdr)) = heap.get(curr_ref).cloned() {
-                let next_car_val = heap.get(next_car).unwrap().clone();
-                vec.push(pairs_to_vec(&next_car_val, heap));
-                curr_ref = next_cdr;
+            let mut current = *cdr_val;
+            while !current.is_nil() {
+                if current.is_gc_ref() {
+                    if let Some(LispExp::Pair(next_car, next_cdr)) = heap.get(current) {
+                        vec.push(value_to_ast(*next_car, heap));
+                        current = *next_cdr;
+                        continue;
+                    }
+                }
+                vec.push(value_to_ast(current, heap));
+                break;
             }
-
             LispExp::List(vec)
         }
-
-        LispExp::Nil => LispExp::List(vec![]),
-        LispExp::List(vec) => LispExp::List(vec.iter().map(|x| pairs_to_vec(x, heap)).collect()),
+        LispExp::List(_) => exp.clone(),
         _ => exp.clone(),
     }
 }
 
-pub fn vec_to_pairs(exp: &LispExp, heap: &mut Heap) -> LispExp {
+pub fn vec_to_pairs(exp: &LispExp, heap: &mut Heap) -> Value {
     match exp {
         LispExp::List(vec) => {
-            if vec.is_empty() {
-                return LispExp::Nil;
-            }
-
-            let mut current = LispExp::Nil;
+            let mut result = Value::nil();
             for item in vec.iter().rev() {
-                let item_eval = vec_to_pairs(item, heap);
-                current = LispExp::Pair(heap.alloc(item_eval), heap.alloc(current));
+                let item_val = if let LispExp::List(_) = item {
+                    vec_to_pairs(item, heap)
+                } else {
+                    ast_to_value(item, heap)
+                };
+                result = heap.alloc(LispExp::Pair(item_val, result));
             }
-            current
+            result
         }
-        _ => exp.clone(),
+        _ => ast_to_value(exp, heap),
+    }
+}
+
+pub fn value_to_ast(val: Value, heap: &Heap) -> LispExp {
+    if val.is_number() {
+        LispExp::Number(val.as_number())
+    } else if val.is_boolean() {
+        LispExp::Bool(val.as_boolean())
+    } else if val.is_nil() {
+        LispExp::Nil
+    } else if val.is_void() {
+        LispExp::Void
+    } else if val.is_gc_ref() {
+        heap.get(val).cloned().unwrap_or(LispExp::Void)
+    } else {
+        LispExp::Void
+    }
+}
+
+pub fn ast_to_value(exp: &LispExp, heap: &mut Heap) -> Value {
+    match exp {
+        LispExp::Number(n) => Value::number(*n),
+        LispExp::Bool(b) => Value::boolean(*b),
+        LispExp::Nil => Value::nil(),
+        LispExp::Void => Value::void(),
+        LispExp::HeapPtr(val) => *val,
+        _ => heap.alloc(exp.clone()),
     }
 }

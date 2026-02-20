@@ -4,14 +4,18 @@ use crate::{
     expand_quasiquote,
     expr::{LispExp, LispLambda},
     heap::Heap,
-    helpers::{env_set, expand_macros, pairs_to_vec},
+    helpers::{ast_to_value, expand_macros, pairs_to_vec, value_to_ast},
 };
 use std::rc::Rc;
 
 pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     match exp {
         LispExp::Symbol(s) => {
-            LispEnv::get(env, &s).ok_or_else(|| format!("Variable not found: '{}'", s))
+            let val = env
+                .borrow()
+                .get(&s)
+                .ok_or_else(|| format!("Variable not found: {}", s))?;
+            Ok(value_to_ast(val, heap))
         }
         LispExp::Number(_) | LispExp::Bool(_) | LispExp::Str(_) => Ok(exp),
         LispExp::Native(_) => Ok(exp),
@@ -83,7 +87,9 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         _ => return Err("Invalid first argument of 'define'".to_string()),
                     };
 
-                    env.borrow_mut().data.insert(name, val);
+                    let value_tag = ast_to_value(&val, heap);
+                    env.borrow_mut().insert(name, value_tag);
+                    // env.borrow_mut().data.insert(name, val);
                     Ok(LispExp::Void)
                 }
                 LispExp::Symbol(s) if s == "lambda" => {
@@ -132,7 +138,8 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         env: env.clone(),
                     });
 
-                    env.borrow_mut().data.insert(macro_name, macro_exp);
+                    env.borrow_mut()
+                        .insert(macro_name, ast_to_value(&macro_exp, heap));
                     Ok(LispExp::Void)
                 }
                 LispExp::Symbol(s) if s == "set!" => {
@@ -147,8 +154,9 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         }
                     };
 
-                    let val = eval(tail[1].clone(), env, heap)?;
-                    env_set(env, var_name, val)?;
+                    let val_ast = eval(tail[1].clone(), env, heap)?;
+                    let val_tag = ast_to_value(&val_ast, heap);
+                    env.borrow_mut().set(var_name, val_tag);
 
                     Ok(LispExp::Void)
                 }
@@ -198,8 +206,6 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         val @ LispExp::VmClosure { .. } => Ok(val),
         LispExp::Vector(v_ref) => Ok(LispExp::Vector(v_ref)),
         LispExp::HashMap(map_ref) => Ok(LispExp::HashMap(map_ref)),
-        LispExp::VectorData(_) | LispExp::HashMapData(_) => {
-            Err("'eval' found a data variant outside the heap".to_string())
-        }
+        LispExp::HeapPtr(value) => todo!(),
     }
 }

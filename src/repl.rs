@@ -9,6 +9,7 @@ use std::borrow::Cow;
 
 use crate::expr::lisp_fmt;
 use crate::heap::Heap;
+use crate::helpers::ast_to_value;
 use crate::{ExecMode, env::Env, expr::LispExp, run_source};
 
 fn print_haki_splash() {
@@ -86,7 +87,12 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
                     match run_source(code, &mut env, mode, heap, false) {
                         Ok(val) => {
                             if mode == ExecMode::Normal && !matches!(val, LispExp::Void) {
-                                println!("=> {}", lisp_fmt(&val, &heap).to_string().green());
+                                println!(
+                                    "=> {}",
+                                    lisp_fmt(ast_to_value(&val, heap), &heap)
+                                        .to_string()
+                                        .green()
+                                );
                             }
                         }
                         Err(e) => eprintln!("{} {}", "Error:".bold().red(), e.red()),

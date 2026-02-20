@@ -1,12 +1,16 @@
+#![allow(unused)]
 use crate::compiler::{compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
 use crate::expr::{LispExp, lisp_fmt};
 use crate::heap::{Heap, collect_garbage};
-use crate::helpers::{apply_macro, apply_procedure, expand_macros, expand_quasiquote};
+use crate::helpers::{
+    apply_macro, apply_procedure, ast_to_value, expand_macros, expand_quasiquote, value_to_ast,
+};
 use crate::parser::{read_from_tokens, tokenize};
 use crate::repl::repl;
 use crate::stdlib::load_stdlib;
+use crate::value::Value;
 use crate::vm::*;
 
 use std::rc::Rc;
@@ -16,11 +20,14 @@ mod env;
 mod evaluate;
 mod expr;
 mod heap;
+
+#[macro_use]
 mod helpers;
 mod parser;
 mod repl;
 mod stdlib;
 mod tests;
+mod value;
 mod vm;
 
 #[derive(Copy, Clone, PartialEq)]
@@ -46,7 +53,7 @@ pub fn run_source(
     let tokens = tokenize(source);
     let mut tokens_iter = tokens.into_iter().peekable();
     let mut vm = Vm::new();
-    let mut last_result = LispExp::Void;
+    let mut last_result = Value::void();
 
     while tokens_iter.peek().is_some() {
         let raw_ast = read_from_tokens(&mut tokens_iter)?;
@@ -56,7 +63,10 @@ pub fn run_source(
         let optimized_ast = optimize_ast(expanded_ast);
 
         if mode == ExecMode::Dump {
-            println!("Expanded AST: {}", lisp_fmt(&optimized_ast, &heap));
+            println!(
+                "Expanded AST: {}",
+                lisp_fmt(ast_to_value(&optimized_ast, heap), &heap)
+            );
         }
 
         if optimized_ast != LispExp::Void {
@@ -71,15 +81,15 @@ pub fn run_source(
                 last_result = vm.execute(Rc::new(chunk), env.clone(), heap)?;
             }
         }
-        collect_garbage(heap, env, &last_result, &vm.stack, debug_gc);
+        collect_garbage(heap, env, last_result, &vm.stack, debug_gc);
     }
 
-    Ok(last_result)
+    Ok(value_to_ast(last_result, heap))
 }
 
 fn main() {
     let mut heap = Heap::new();
-    let mut global_env = standard_env();
+    let mut global_env = standard_env(&mut heap);
 
     let macros_src = include_str!("../std/macros.lsp");
     let lib_src = include_str!("../std/lib.lsp");

@@ -4,6 +4,7 @@ use crate::{
     expr::LispExp,
     heap::Heap,
     helpers::{pairs_to_vec, vec_to_pairs},
+    value::Value,
     vm::{Chunk, OpCode},
 };
 
@@ -23,15 +24,42 @@ pub fn compile(
                 chunk.code.push(OpCode::Return);
             }
         }
-        LispExp::Number(_) | LispExp::Str(_) | LispExp::Bool(_) | LispExp::Void => {
-            chunk.code.push(OpCode::PushConst(exp.clone()));
+        LispExp::Number(n) => {
+            let val = Value::number(*n);
+            let idx = chunk.add_constant(val);
+            chunk.code.push(OpCode::Constant(idx));
+            if is_tail {
+                chunk.code.push(OpCode::Return);
+            }
+        }
+        LispExp::Bool(b) => {
+            let val = Value::boolean(*b);
+            let idx = chunk.add_constant(val);
+            chunk.code.push(OpCode::Constant(idx));
+            if is_tail {
+                chunk.code.push(OpCode::Return);
+            }
+        }
+        LispExp::Str(s) => {
+            let val = heap.alloc(LispExp::Str(s.clone()));
+            let idx = chunk.add_constant(val);
+            chunk.code.push(OpCode::Constant(idx));
+
+            if is_tail {
+                chunk.code.push(OpCode::Return);
+            }
+        }
+        LispExp::Void => {
+            let idx = chunk.add_constant(Value::void());
+            chunk.code.push(OpCode::Constant(idx));
+
             if is_tail {
                 chunk.code.push(OpCode::Return);
             }
         }
         LispExp::Pair(_, _) => {
-            let ast_list = pairs_to_vec(exp, heap);
-            compile(&ast_list, chunk, is_tail, heap)?
+            let ast_vec = pairs_to_vec(exp, heap);
+            compile(&LispExp::List(vec![ast_vec]), chunk, is_tail, heap)?
         }
         LispExp::List(list) => {
             if list.is_empty() {
@@ -45,7 +73,8 @@ pub fn compile(
                     }
                     let runtime_list = vec_to_pairs(&list[1], heap);
 
-                    chunk.code.push(OpCode::PushConst(runtime_list));
+                    let idx = chunk.add_constant(runtime_list);
+                    chunk.code.push(OpCode::Constant(idx));
                     if is_tail {
                         chunk.code.push(OpCode::Return);
                     }
@@ -189,7 +218,8 @@ pub fn compile(
                     if list.len() > 3 {
                         compile(&list[3], chunk, is_tail, heap)?;
                     } else if !is_tail {
-                        chunk.code.push(OpCode::PushConst(LispExp::Void));
+                        let idx = chunk.add_constant(Value::void());
+                        chunk.code.push(OpCode::Constant(idx));
                     }
                     if !is_tail {
                         chunk.code[jump_idx] = OpCode::Jump(chunk.code.len());
