@@ -8,9 +8,16 @@
 (define arquivos-validos (filter nao-vazio? lista-arquivos))
 
 (define (contar-linhas nome-arquivo)
-  (let* ((conteudo (slurp nome-arquivo))
-        (linhas (string-split conteudo "\n")))
-    (length linhas)))
+  (let* ((conteudo (slurp nome-arquivo)))
+    (if (string? conteudo) ;; Proteção contra leitura falha
+        (let ((linhas (string-split conteudo "\n")))
+          (length linhas))
+        0)))
+
+; (define (contar-linhas nome-arquivo)
+;   (let* ((conteudo (slurp nome-arquivo))
+;         (linhas (string-split conteudo "\n")))
+;     (length linhas)))
 
 (define linhas-por-arquivo (map contar-linhas arquivos-validos))
 

@@ -1,5 +1,3 @@
-use std::fmt;
-
 // Quiet NaN
 const QNAN: u64 = 0x7FFC000000000000;
 

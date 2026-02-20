@@ -1,4 +1,5 @@
 use crate::value::Value;
+use crate::vm::{Chunk, OpCode};
 use crate::{env::Env, expr::LispExp};
 use std::collections::HashMap as RustHashMap;
 
@@ -110,11 +111,24 @@ impl Heap {
                     curr_env = env_borrowed.outer.clone();
                 }
 
-                for const_val in &chunk.constants {
-                    self.mark_val(*const_val);
-                }
+                self.mark_chunk(&chunk);
+                // for const_val in &chunk.constants {
+                //     self.mark_val(*const_val);
+                // }
             }
             _ => {}
+        }
+    }
+
+    pub fn mark_chunk(&mut self, chunk: &Chunk) {
+        for const_val in &chunk.constants {
+            self.mark_val(*const_val);
+        }
+
+        for op in &chunk.code {
+            if let OpCode::MakeClosure(_, inner_chunk) = op {
+                self.mark_chunk(inner_chunk);
+            }
         }
     }
 

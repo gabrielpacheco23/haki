@@ -1,12 +1,9 @@
 use crate::value::Value;
 use crate::{arithmetic_op, def_fold1};
 use rand::RngExt;
-use serde_json::Value as jsonValue;
 
-use crate::compiler::compile;
 use crate::heap::{Heap, collect_garbage};
-use crate::helpers::{apply_procedure, ast_to_value, expand_macros, pairs_to_vec, vec_to_pairs};
-use crate::vm::{Chunk, OpCode, Vm};
+use crate::helpers::ast_to_value;
 use crate::{compare_op, def_fold, def_is, def_math};
 use crate::{expr::*, run_script};
 use std::cell::RefCell;

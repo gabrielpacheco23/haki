@@ -1,10 +1,6 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::eval;
 use crate::heap::Heap;
 use crate::value::Value;
-use crate::vm::Vm;
 use crate::{
     env::{Env, LispEnv},
     expr::*,
@@ -250,7 +246,7 @@ pub fn apply_procedure(
                     .insert(p.clone(), ast_to_value(a, heap));
             }
             let mut sub_vm = crate::vm::Vm::new();
-            let result_val = sub_vm.execute(chunk.clone(), new_env, heap)?;
+            let result_val = sub_vm.execute(chunk.clone(), new_env, heap, false)?;
             Ok(value_to_ast(result_val, heap))
         }
         _ => Err(format!(
@@ -262,11 +258,13 @@ pub fn apply_procedure(
 
 pub fn expand_quasiquote(exp: &LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
     match exp {
+        // Se encontrar (,algo), avalia o 'algo'
         LispExp::List(l, _) if l.len() == 2 && is_symbol(&l[0], "unquote") => {
             eval(l[1].clone(), env, heap)
         }
+        // Recursão em listas
         LispExp::List(l, line) => {
-            let mut new_list = vec![];
+            let mut new_list = Vec::with_capacity(l.len());
             for item in l {
                 new_list.push(expand_quasiquote(item, env, heap)?);
             }
@@ -281,13 +279,12 @@ pub fn expand_quasiquote(exp: &LispExp, env: &mut Env, heap: &mut Heap) -> Resul
 //         LispExp::List(l, _) if l.len() == 2 && is_symbol(&l[0], "unquote") => {
 //             eval(l[1].clone(), env, heap)
 //         }
-//         LispExp::List(l, _) => {
+//         LispExp::List(l, line) => {
 //             let mut new_list = vec![];
 //             for item in l {
 //                 new_list.push(expand_quasiquote(item, env, heap)?);
 //             }
-
-//             Ok(LispExp::List(new_list, 0))
+//             Ok(LispExp::List(new_list, *line))
 //         }
 //         _ => Ok(exp.clone()),
 //     }
@@ -298,6 +295,7 @@ fn is_symbol(exp: &LispExp, name: &str) -> bool {
 }
 
 pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
+    // Primeiro, garantimos que a árvore está em formato de Listas nativas
     let ast = pairs_to_vec(&ast, heap);
 
     match ast {
@@ -307,48 +305,36 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
             }
 
             if let LispExp::Symbol(s, _) = &list[0] {
-                if s == "defmacro" {
-                    eval(LispExp::List(list.clone(), line), env, heap)?;
-                    return Ok(LispExp::Void);
-                }
-                if s == "quote" {
-                    return Ok(LispExp::List(list.clone(), line));
-                }
-                if s == "lambda" {
-                    if list.len() < 3 {
-                        return Err("Malformed lambda".to_string());
+                // Comandos especiais que não devem expandir seus cabeçalhos
+                match s.as_str() {
+                    "defmacro" => {
+                        eval(LispExp::List(list, line), env, heap)?;
+                        return Ok(LispExp::Void);
                     }
-                    let mut new_list = vec![list[0].clone(), list[1].clone()];
-                    for item in &list[2..] {
-                        new_list.push(expand_macros(item.clone(), env, heap)?);
+                    "quote" => return Ok(LispExp::List(list, line)),
+                    "lambda" | "λ" | "define" => {
+                        if list.len() < 3 {
+                            return Err(format!("Malformed {}", s));
+                        }
+                        let mut new_list = vec![list[0].clone(), list[1].clone()];
+                        for item in &list[2..] {
+                            new_list.push(expand_macros(item.clone(), env, heap)?);
+                        }
+                        return Ok(LispExp::List(new_list, line));
                     }
-                    return Ok(LispExp::List(new_list, line));
-                }
-                if s == "define" {
-                    if list.len() < 3 {
-                        return Err("Malformed define".to_string());
-                    }
-                    let mut new_list = vec![list[0].clone(), list[1].clone()];
-                    for item in &list[2..] {
-                        new_list.push(expand_macros(item.clone(), env, heap)?);
-                    }
-                    return Ok(LispExp::List(new_list, line));
+                    _ => {}
                 }
 
+                // Tenta expandir se for uma Macro
                 if let Some(macro_def) = find_macro(env, s, heap) {
                     let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
-                    let mut fully_expanded = expand_macros(expanded_ast, env, heap)?;
-
-                    if let LispExp::List(_, ref mut expanded_line) = fully_expanded {
-                        if *expanded_line == 0 {
-                            *expanded_line = line;
-                        }
-                    }
-                    return Ok(fully_expanded);
+                    // Recursão: a macro pode retornar outra macro!
+                    return expand_macros(expanded_ast, env, heap);
                 }
             }
 
-            let mut new_list = vec![];
+            // Se não for macro, expande os itens internos
+            let mut new_list = Vec::with_capacity(list.len());
             for item in list {
                 new_list.push(expand_macros(item, env, heap)?);
             }
@@ -362,18 +348,18 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
 //     let ast = pairs_to_vec(&ast, heap);
 
 //     match ast {
-//         LispExp::List(list, _) => {
+//         LispExp::List(list, line) => {
 //             if list.is_empty() {
-//                 return Ok(LispExp::List(list, 0));
+//                 return Ok(LispExp::List(list, line));
 //             }
 
 //             if let LispExp::Symbol(s, _) = &list[0] {
 //                 if s == "defmacro" {
-//                     eval(LispExp::List(list.clone(), 0), env, heap)?;
+//                     eval(LispExp::List(list.clone(), line), env, heap)?;
 //                     return Ok(LispExp::Void);
 //                 }
 //                 if s == "quote" {
-//                     return Ok(LispExp::List(list.clone(), 0));
+//                     return Ok(LispExp::List(list.clone(), line));
 //                 }
 //                 if s == "lambda" {
 //                     if list.len() < 3 {
@@ -383,7 +369,7 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
 //                     for item in &list[2..] {
 //                         new_list.push(expand_macros(item.clone(), env, heap)?);
 //                     }
-//                     return Ok(LispExp::List(new_list, 0));
+//                     return Ok(LispExp::List(new_list, line));
 //                 }
 //                 if s == "define" {
 //                     if list.len() < 3 {
@@ -393,12 +379,19 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
 //                     for item in &list[2..] {
 //                         new_list.push(expand_macros(item.clone(), env, heap)?);
 //                     }
-//                     return Ok(LispExp::List(new_list, 0));
+//                     return Ok(LispExp::List(new_list, line));
 //                 }
 
 //                 if let Some(macro_def) = find_macro(env, s, heap) {
 //                     let expanded_ast = apply_macro(&macro_def, &list[1..], env, heap)?;
-//                     return expand_macros(expanded_ast, env, heap);
+//                     let mut fully_expanded = expand_macros(expanded_ast, env, heap)?;
+
+//                     if let LispExp::List(_, ref mut expanded_line) = fully_expanded {
+//                         if *expanded_line == 0 {
+//                             *expanded_line = line;
+//                         }
+//                     }
+//                     return Ok(fully_expanded);
 //                 }
 //             }
 
@@ -406,7 +399,7 @@ pub fn expand_macros(ast: LispExp, env: &mut Env, heap: &mut Heap) -> Result<Lis
 //             for item in list {
 //                 new_list.push(expand_macros(item, env, heap)?);
 //             }
-//             Ok(LispExp::List(new_list, 0))
+//             Ok(LispExp::List(new_list, line))
 //         }
 //         _ => Ok(ast),
 //     }
@@ -469,40 +462,6 @@ pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
         _ => exp.clone(),
     }
 }
-
-// pub fn pairs_to_vec(exp: &LispExp, heap: &Heap) -> LispExp {
-//     match exp {
-//         LispExp::Pair(car_val, cdr_val) => {
-//             let mut vec = vec![];
-//             vec.push(value_to_ast(*car_val, heap));
-
-//             let mut current = *cdr_val;
-//             while !current.is_nil() {
-//                 if current.is_gc_ref() {
-//                     match heap.get(current) {
-//                         Some(LispExp::Pair(next_car, next_cdr)) => {
-//                             vec.push(value_to_ast(*next_car, heap));
-//                             current = *next_cdr;
-//                             continue;
-//                         }
-//                         Some(LispExp::List(l, _)) => {
-//                             for item in l {
-//                                 vec.push(item.clone());
-//                             }
-//                             break;
-//                         }
-//                         _ => {}
-//                     }
-//                 }
-//                 vec.push(value_to_ast(current, heap));
-//                 break;
-//             }
-//             LispExp::List(vec, 0)
-//         }
-//         LispExp::List(_, _) => exp.clone(),
-//         _ => exp.clone(),
-//     }
-// }
 
 pub fn vec_to_pairs(exp: &LispExp, heap: &mut Heap) -> Value {
     match exp {

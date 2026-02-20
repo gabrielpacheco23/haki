@@ -147,6 +147,27 @@ pub fn compile(
                     _ => return Err("Invalid define".to_string()),
                 },
                 LispExp::Symbol(s, _) if aritmethic_operators.contains(&s.as_str()) => {
+                    if list.len() == 2 {
+                        if s == "-" {
+                            let idx = chunk.add_constant(Value::number(0.0));
+                            chunk.write(OpCode::Constant(idx), current_line);
+                            compile(&list[1], chunk, false, heap, current_line)?;
+                            chunk.write(OpCode::Sub, current_line);
+                        } else if s == "/" {
+                            let idx = chunk.add_constant(Value::number(1.0));
+                            chunk.write(OpCode::Constant(idx), current_line);
+                            compile(&list[1], chunk, false, heap, current_line)?;
+                            chunk.write(OpCode::Div, current_line);
+                        } else {
+                            return Err(format!("'{}' requires at least 2 arguments", s));
+                        }
+
+                        if is_tail {
+                            chunk.write(OpCode::Return, current_line);
+                        }
+                        return Ok(());
+                    }
+
                     if list.len() < 3 {
                         return Err(format!("{} requires arguments", s));
                     }

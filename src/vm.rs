@@ -1,10 +1,13 @@
-use crate::{helpers::ast_to_value, value::Value};
+use crate::{
+    evaluate::eval,
+    helpers::{ast_to_value, pairs_to_vec},
+    value::Value,
+};
 use std::{fmt::Display, rc::Rc};
 
 use crate::{
     env::{Env, LispEnv},
-    evaluate::eval,
-    expr::{LispExp, lisp_fmt},
+    expr::LispExp,
     heap::Heap,
 };
 
@@ -136,11 +139,17 @@ impl Vm {
         chunk: Rc<Chunk>,
         env: Env,
         heap: &mut Heap,
+        is_repl: bool,
     ) -> Result<Value, String> {
         match self.execute_inner(chunk, env, heap) {
             Ok(val) => Ok(val),
             Err(err) => {
-                let mut trace = format!("\n[ERROR] {}\n", err);
+                let mut trace = String::from("");
+                if !is_repl {
+                    trace.push_str(&format!("\n[Error] {}\n", err));
+                } else {
+                    trace.push_str(&format!("{}\n", err));
+                }
                 trace.push_str("Stack trace:\n");
 
                 for frame in self.frames.iter().rev() {
@@ -270,6 +279,31 @@ impl Vm {
                                     env: new_env,
                                 });
                             }
+                        }
+                        LispExp::Lambda(lambda) => {
+                            let mut new_env = LispEnv::new(Some(lambda.env.clone()));
+                            let params_flat = pairs_to_vec(&*lambda.params, heap);
+                            if let LispExp::List(params, _) = params_flat {
+                                if args.len() != params.len() {
+                                    return Err("Incorrect arity".to_string());
+                                }
+                                for (param, arg) in params.iter().zip(args.iter()) {
+                                    if let LispExp::Symbol(name, _) = param {
+                                        new_env.borrow_mut().insert(name.clone(), *arg);
+                                    }
+                                }
+                            }
+
+                            let result_ast = eval((*lambda.body).clone(), &mut new_env, heap)?;
+                            let resul_val = ast_to_value(&result_ast, heap);
+
+                            if is_tail {
+                                self.frames.pop();
+                                if self.frames.is_empty() {
+                                    return Ok(resul_val);
+                                }
+                            }
+                            self.stack.push(resul_val);
                         }
                         _ => return Err("Object is not callable".to_string()),
                     }

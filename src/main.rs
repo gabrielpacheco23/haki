@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::compiler::{compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
@@ -40,7 +39,7 @@ fn run_script(path: &str, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Error reading the file '{}': {}", path, e))?;
 
-    run_source(&content, env, ExecMode::Normal, heap, false)
+    run_source(&content, env, ExecMode::Normal, heap, false, false)
 }
 
 pub fn run_source(
@@ -49,6 +48,7 @@ pub fn run_source(
     mode: ExecMode,
     heap: &mut Heap,
     debug_gc: bool,
+    is_repl: bool,
 ) -> Result<LispExp, String> {
     let tokens = tokenize(source);
     let mut tokens_iter = tokens.into_iter().peekable();
@@ -79,7 +79,7 @@ pub fn run_source(
             if mode == ExecMode::Dump {
                 disassemble_chunk(&chunk, "Block", &heap);
             } else {
-                last_result = vm.execute(Rc::new(chunk), env.clone(), heap)?;
+                last_result = vm.execute(Rc::new(chunk), env.clone(), heap, is_repl)?;
             }
         }
         collect_garbage(heap, env, last_result, &vm.stack, debug_gc);
@@ -105,7 +105,7 @@ fn main() {
         match run_script(file_path, &mut global_env, &mut heap) {
             Ok(_) => std::process::exit(0),
             Err(e) => {
-                eprintln!("Error executing the script: {}", e);
+                eprintln!("\x1b[1;31mFailed executing the script: {}\x1b[0m", e);
                 std::process::exit(1);
             }
         }

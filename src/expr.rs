@@ -1,6 +1,5 @@
 use crate::env::Env;
 use crate::heap::Heap;
-use crate::helpers::ast_to_value;
 use crate::value::Value;
 use crate::vm::Chunk;
 
@@ -128,6 +127,7 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
                 }
                 write!(f, " }}")
             }
+            LispExp::Macro(_) => write!(f, "<macro>"),
             _ => write!(f, "<unknown>"),
         }
     }

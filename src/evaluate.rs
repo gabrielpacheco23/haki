@@ -1,6 +1,6 @@
 use crate::{
     apply_macro, apply_procedure,
-    env::{Env, LispEnv},
+    env::Env,
     expand_quasiquote,
     expr::{LispExp, LispLambda},
     heap::Heap,
@@ -9,12 +9,6 @@ use crate::{
 use std::rc::Rc;
 
 pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, String> {
-    // let line = match &exp {
-    //     LispExp::Symbol(_, l) => *l,
-    //     LispExp::List(_, l) => *l,
-    //     _ => 0,
-    // };
-
     match exp {
         LispExp::Symbol(s, _) => {
             let val = env
@@ -162,7 +156,7 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
 
                     let val_ast = eval(tail[1].clone(), env, heap)?;
                     let val_tag = ast_to_value(&val_ast, heap);
-                    env.borrow_mut().set(var_name, val_tag);
+                    let _ = env.borrow_mut().set(var_name, val_tag);
 
                     Ok(LispExp::Void)
                 }
@@ -213,6 +207,6 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         val @ LispExp::VmClosure { .. } => Ok(val),
         LispExp::Vector(v_ref) => Ok(LispExp::Vector(v_ref)),
         LispExp::HashMap(map_ref) => Ok(LispExp::HashMap(map_ref)),
-        LispExp::HeapPtr(value) => todo!(),
+        LispExp::HeapPtr(_) => todo!(),
     }
 }

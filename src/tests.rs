@@ -11,7 +11,7 @@ mod tests {
     // para compilar e rodar strings de código (a mesma usada no REPL).
     fn run_haki(code: &str) -> LispExp {
         let mut heap = Heap::new();
-        let mut env = standard_env();
+        let mut env = standard_env(&mut heap);
 
         // Carrega as macros essenciais (certifique-se de que o caminho está correto no seu projeto)
         // Se a função `run_source` retornar Result, o `let _` ignora o retorno com segurança.
@@ -21,6 +21,7 @@ mod tests {
             ExecMode::Normal,
             &mut heap,
             false,
+            false,
         );
         let _ = run_source(
             "(load \"std/lib.lsp\")",
@@ -28,9 +29,10 @@ mod tests {
             ExecMode::Normal,
             &mut heap,
             false,
+            false,
         );
 
-        run_source(code, &mut env, ExecMode::Normal, &mut heap, false)
+        run_source(code, &mut env, ExecMode::Normal, &mut heap, false, false)
             .unwrap_or_else(|e| panic!("Erro no teste: {}\nCódigo: {}", e, code))
     }
 

@@ -84,7 +84,7 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
                         (ExecMode::Normal, code_to_run)
                     };
 
-                    match run_source(code, &mut env, mode, heap, false) {
+                    match run_source(code, &mut env, mode, heap, false, true) {
                         Ok(val) => {
                             if mode == ExecMode::Normal && !matches!(val, LispExp::Void) {
                                 println!(
@@ -95,7 +95,7 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
                                 );
                             }
                         }
-                        Err(e) => eprintln!("{} {}", "".bold().red(), e.red()),
+                        Err(e) => eprintln!("{} {}", "[Error]".bold().red(), e.red()),
                     }
 
                     buffer.clear();

@@ -2,6 +2,9 @@
 
 ; (define cadr (lambda (x) (car (cdr x))))
 
+(define (not x)
+  (if x #f #t))
+
 (define append (lambda (l1 l2)
     (if (null? l1)
         l2
