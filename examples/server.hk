@@ -1,0 +1,29 @@
+;; Import web procs
+(require "web.hk")
+
+(displayln "Starting Haki Web Server...")
+
+(define acessos 0)
+
+;; Routes 
+(get "/" 
+  (lambda (req) 
+    "<h1>Hello from Haki Lisp!</h1><p>Access /api or /test</p>"))
+
+(get "/test" 
+  (lambda (req) 
+    (string-append "Your original HTTP method was: " (hash-ref req "method"))))
+
+(get "/api" 
+  (lambda (req)
+    (set! acessos (+ acessos 1))
+    (string-append "{\"status\": \"ok\", \"acessos_totais\": " (number->string acessos) "}")))
+
+;; Extract handler to named function
+(define (handler-post req)
+  "You have sent a POST! Data received successfully.")
+
+(post "/enviar" handler-post)
+
+;; Start server
+(listen 8080)

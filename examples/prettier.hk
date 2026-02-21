@@ -1,0 +1,71 @@
+;; ==========================================
+;; HAKI PRETTIER - O TOQUE DE OURO
+;; ==========================================
+(displayln "=== Haki Prettier ===")
+
+;; 1. Utilitário: Conta quantas vezes um caractere aparece numa string
+(define (contar-char str char)
+  (length (filter (lambda (c) (equal? c char)) (string->list str))))
+
+;; 2. Utilitário: Gera os espaços de identação (2 espaços por nível)
+(define (repetir-espacos n)
+  (if (<= n 0)
+      ""
+      (string-append "  " (repetir-espacos (- n 1)))))
+
+;; 3. O Motor de Identação Mágica (Usando Tail Call Optimization puro!)
+(define (identar-linhas linhas nivel acc)
+  (if (null? linhas)
+      (reverse acc) ;; Quando acabar, invertemos a lista acumulada
+      (let* ((linha (car linhas))
+             (abertos (contar-char linha "("))
+             (fechados (contar-char linha ")"))
+             (saldo (- abertos fechados))
+             
+             ;; Heurística Lisp: Se a linha fecha mais coisas do que abre, 
+             ;; nós recuamos a identação dela ANTES de imprimir!
+             (nivel-real (if (< saldo 0) (max 0 (+ nivel saldo)) nivel))
+             
+             ;; O próximo nível soma o saldo total
+             (proximo-nivel (max 0 (+ nivel saldo)))
+             
+             (linha-identada (string-append (repetir-espacos nivel-real) linha)))
+        
+        ;; Chamada Recursiva de Cauda (TCO entra em ação aqui!)
+        (identar-linhas (cdr linhas) proximo-nivel (cons linha-identada acc)))))
+
+;; 4. O Formatador Principal
+(define (formatar-codigo texto)
+  (let* (
+         ;; Limpeza bruta
+         (t1 (regex-replace "\\( +" texto "("))
+         (t2 (regex-replace " +\\)" t1 ")"))
+         (t3 (regex-replace "\\(define\\(" t2 "(define ("))
+         
+         ;; Separação
+         (linhas (string-split t3 "\n"))
+         (linhas-limpas (map string-trim linhas))
+         (linhas-validas (filter (lambda (linha) (not (string-empty? linha))) linhas-limpas))
+         
+         ;; === O TOQUE DE OURO ===
+         ;; Passamos a lista, o nível inicial (0) e o acumulador vazio '()
+         (linhas-identadas (identar-linhas linhas-validas 0 '()))
+         )
+         
+    ;; Junta o código perfeitamente tabelado
+    (string-join linhas-identadas "\n")))
+
+;; 5. A Ferramenta CLI
+(define (haki-prettier arquivo)
+  (display "Lendo arquivo: ") (displayln arquivo)
+  (try
+    (let ((codigo-sujo (read-file arquivo)))
+      (displayln "Formatando e Identando...")
+      (let ((codigo-limpo (formatar-codigo codigo-sujo)))
+        (write-file arquivo codigo-limpo)
+        (displayln "[SUCESSO] Arquivo formatado com identação inteligente!")))
+    (catch err
+      (display "ERRO FATAL: ") (displayln err))))
+
+;; Executa
+(haki-prettier "benchmark.hk")

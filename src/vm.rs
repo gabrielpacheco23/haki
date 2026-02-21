@@ -164,12 +164,26 @@ impl Vm {
             if let UpvalueState::Open(idx) = *state {
                 if idx >= last_stack_idx {
                     *state = UpvalueState::Closed(self.stack[idx]);
-                    return false;
+                    return false; // fecha a variável e tira da lista
                 }
+                return true; // mantém na lista
             }
-            true
+            false // se já estiver fechado, tira da lista
         });
     }
+
+    // pub fn close_upvalues(&mut self, last_stack_idx: usize) {
+    //     self.open_upvalues.retain(|upvalue| {
+    //         let mut state = upvalue.state.borrow_mut();
+    //         if let UpvalueState::Open(idx) = *state {
+    //             if idx >= last_stack_idx {
+    //                 *state = UpvalueState::Closed(self.stack[idx]);
+    //                 return false;
+    //             }
+    //         }
+    //         true
+    //     });
+    // }
 
     pub fn execute(
         &mut self,
@@ -290,7 +304,7 @@ impl Vm {
                 OpCode::Call(arg_count) | OpCode::TailCall(arg_count) => {
                     let is_tail = matches!(op, OpCode::TailCall(_));
 
-                    // Os argumentos já estão no topo da pilha. A função está logo abaixo deles!
+                    // Os argumentos já estão no topo da pilha. A função está logo abaixo deles
                     let stack_offset = self.stack.len() - arg_count;
                     let func_val = self.stack[stack_offset - 1];
 
@@ -301,6 +315,23 @@ impl Vm {
                     let func_exp = heap.get(func_val).unwrap().clone();
                     match func_exp {
                         LispExp::Native(f) => {
+                            // Fecha os Upvalues de qualquer closure que esteja
+                            // sendo enviada para o mundo nativo (como o try-catch).
+                            for arg in &self.stack[stack_offset..] {
+                                if arg.is_gc_ref() {
+                                    if let Some(LispExp::VmClosure { upvalues, .. }) =
+                                        heap.get(*arg)
+                                    {
+                                        for upval in upvalues {
+                                            let mut state = upval.state.borrow_mut();
+                                            if let UpvalueState::Open(idx) = *state {
+                                                *state = UpvalueState::Closed(self.stack[idx]);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             let args_slice = &self.stack[stack_offset..].to_vec();
                             let mut temp_env = env.clone();
                             let result = f(args_slice, &mut temp_env, heap)?;

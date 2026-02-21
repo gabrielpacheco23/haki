@@ -1051,6 +1051,98 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
             Err("Invalid ASCII code".to_string())
         });
+
+        add_native!(env, heap, "start-server", |args, env_ref, heap_| {
+            if args.len() != 2 {
+                return Err("'start-server' requires (port handler-fn)".to_string());
+            }
+
+            let port = if args[0].is_number() {
+                args[0].as_number() as u16
+            } else {
+                return Err("Port must be a number".to_string());
+            };
+
+            // Transforma a closure recebida em AST para podermos executá-la depois
+            let handler_ast = value_to_ast(args[1], heap_);
+
+            use std::io::{Read, Write};
+            use std::net::TcpListener;
+
+            let address = format!("127.0.0.1:{}", port);
+            let listener = TcpListener::bind(&address).map_err(|e| e.to_string())?;
+            println!("[Haki Server] Rodando e ouvindo em http://{}", address);
+
+            // O Loop Infinito do Servidor (Trava a VM aqui)
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(mut stream) => {
+                        let mut buffer = [0; 2048];
+                        if let Ok(bytes_read) = stream.read(&mut buffer) {
+                            let request_str =
+                                String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+                            // Ignora requisições vazias (como health-checks ou pings fantasmas)
+                            if request_str.trim().is_empty() {
+                                continue;
+                            }
+
+                            // 1. Passa a requisição do navegador para o Lisp!
+                            // let arg_exp = crate::expr::LispExp::Str(request_str);
+
+                            // Lê a primeira linha: "GET /caminho HTTP/1.1"
+                            let mut parts = request_str.split_whitespace();
+                            let method = parts.next().unwrap_or("GET");
+                            let path = parts.next().unwrap_or("/");
+
+                            // Constrói um Dicionário (HashMap) para o Lisp!
+                            let mut req_map = RustHashMap::new();
+                            req_map.insert(
+                                "method".to_string(),
+                                heap_.alloc_string(method.to_string()),
+                            );
+                            req_map
+                                .insert("path".to_string(), heap_.alloc_string(path.to_string()));
+                            req_map.insert("raw".to_string(), heap_.alloc_string(request_str));
+
+                            let arg_exp = LispExp::HashMap(req_map);
+
+                            match apply_procedure(&handler_ast, &[arg_exp], env_ref, heap_) {
+                                Ok(res_ast) => {
+                                    // 2. Pega o que o Lisp retornou
+                                    let res_val = crate::helpers::ast_to_value(&res_ast, heap_);
+                                    let response_body = if let Some(crate::expr::LispExp::Str(s)) =
+                                        heap_.get(res_val)
+                                    {
+                                        s.clone()
+                                    } else {
+                                        crate::expr::lisp_fmt(res_val, heap_).to_string()
+                                    };
+
+                                    // 3. Empacota como uma resposta HTTP real e devolve ao navegador
+                                    let response = format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
+                                        response_body.len(),
+                                        response_body
+                                    );
+                                    let _ = stream.write_all(response.as_bytes());
+                                }
+                                Err(e) => {
+                                    println!("[Server Error] {}", e);
+                                    let error_res = format!(
+                                        "HTTP/1.1 500 Internal Server Error\r\n\r\nErro Lisp: {}",
+                                        e
+                                    );
+                                    let _ = stream.write_all(error_res.as_bytes());
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => println!("Falha na conexão: {}", e),
+                }
+            }
+            Ok(Value::void())
+        });
     }
 
     lisp_env

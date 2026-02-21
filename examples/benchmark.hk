@@ -1,31 +1,28 @@
-
 (displayln "=== TESTE 1: MUTAÇÃO DE UPVALUES (1 Milhão de ciclos) ===")
 
 (define (make-counter)
   (let ((count 0))
     (lambda ()
       (set! count (+ count 1))
-      count)))
+  count)))
 
 (define meu-contador (make-counter))
-
-(time
-  (dotimes (i 1000000)
+  (time (dotimes (i 1000000)
     (meu-contador)))
+
 
 (display "Contagem final: ")
 (displayln (meu-contador))
 (displayln "")
-
-
 (displayln "=== TESTE 2: ESCOPO LÉXICO PROFUNDO (500 Mil ciclos) ===")
 
-(define (make-adder a)
+(define
+  (make-adder a)
   (lambda (b)
     (lambda (c)
       (lambda (d)
         ;; Acessa variáveis de 4 níveis de escopo diferentes!
-        (+ a b c d)))))
+(+ a b c d)))))
 
 (define add-10 (make-adder 10))
 (define add-10-20 (add-10 20))
@@ -36,15 +33,14 @@
     (add-10-20-30 i)))
 
 (displayln "")
-
 (displayln "=== TESTE 3: TCO EM VARIÁVEIS LOCAIS (5 Milhões de ciclos) ===")
 
 (define (sum-loop n acc)
   (if (= n 0)
-      acc
-      (sum-loop (- n 1) (+ acc n))))
-
+    acc
+(sum-loop (- n 1) (+ acc n))))
 (time
   (begin
     (display "Resultado da soma: ")
-    (displayln (sum-loop 5000000 0))))
+
+(displayln (sum-loop 5000000 0))))

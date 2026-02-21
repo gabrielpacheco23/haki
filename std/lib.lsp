@@ -145,13 +145,24 @@
 (define (compose f g)
   (lambda (x) (f (g x))))
 
-;; Pipeline operator estilo Elixir/F# (Macro)
-; (defmacro (-> x &rest forms)
-;   (if (null? forms)
-;       x
-;       (let ((form (car forms))
-;             (rest (cdr forms)))
-;         (let ((new-x (if (list? form)
-;                          (append form (list x))
-;                          (list form x))))
-;           (cons '-> (cons new-x rest))))))
+;; Verifica se um item existe na lista
+;; Ex: (contains? '(1 2 3) 2) -> #t
+(define (contains? lst item)
+  (any? (lambda (x) (equal? x item)) lst))
+
+;; ==========================================
+;; ORDENAÇÃO (QUICK SORT)
+;; Ex: (sort < '(3 1 4 1 5 9)) -> '(1 1 3 4 5 9)
+;; ==========================================
+(define (sort cmp? lst)
+  (if (or (null? lst) (null? (cdr lst)))
+      lst 
+      (let ((pivot (car lst))
+            (rest (cdr lst)))
+        (append 
+          ;; 1. Ordena os menores (ou maiores) que o pivô
+          (sort cmp? (filter (lambda (x) (cmp? x pivot)) rest))
+          
+          ;; 2. Aninhamos o segundo append aqui!
+          (append (list pivot)
+                  (sort cmp? (filter (lambda (x) (not (cmp? x pivot))) rest)))))))

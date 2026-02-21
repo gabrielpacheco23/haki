@@ -1,0 +1,25 @@
+;; ==========================================
+;; HAKI WEB FRAMEWORK (like Express.js)
+;; ==========================================
+
+(define *routes* (make-hash))
+
+(define (get path handler)
+  (hash-set! *routes* (string-append "GET:" path) handler))
+
+(define (post path handler)
+  (hash-set! *routes* (string-append "POST:" path) handler))
+
+(define (main-router req)
+  (let* ((method (hash-ref req "method"))
+         (path (hash-ref req "path"))
+         (key (string-append method ":" path))
+         (handler (hash-ref *routes* key)))
+         
+    (if (null? handler)
+        (string-append "<h1>Erro 404</h1><p>A rota <b>" path "</b> nao existe.</p>")
+        (handler req))))
+
+;; Uma casca para iniciar o servidor escondendo o roteador central
+(define (listen porta)
+  (start-server porta main-router))
