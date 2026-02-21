@@ -651,7 +651,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Ge(n) => println!("{:<18} ({} args)", instruction, n),
             OpCode::Pop => println!("{}", instruction),
             OpCode::Return => println!("{}", instruction),
-            OpCode::MakeClosure(params, closure_chunk, upvalues) => {
+            OpCode::MakeClosure(params, closure_chunk, _upvalues) => {
                 println!("{:<18} {:?}", instruction, params);
                 println!("\n  [Closure Start {:?}]", params);
                 disassemble_chunk(closure_chunk, "Closure Body", heap);

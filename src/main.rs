@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::compiler::{CompilerState, compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
