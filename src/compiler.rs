@@ -8,11 +8,103 @@ use crate::{
     vm::{Chunk, OpCode},
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Local {
+    pub name: String,
+    pub depth: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompilerUpvalue {
+    pub index: usize,
+    pub is_local: bool,
+}
+
+pub struct CompilerContext {
+    pub locals: Vec<Local>,
+    pub upvalues: Vec<CompilerUpvalue>,
+    pub scope_depth: usize,
+}
+
+impl CompilerContext {
+    pub fn new() -> Self {
+        CompilerContext {
+            locals: vec![],
+            upvalues: vec![],
+            scope_depth: 0,
+        }
+    }
+
+    pub fn add_local(&mut self, name: String) -> usize {
+        let local = Local {
+            name,
+            depth: self.scope_depth,
+        };
+
+        self.locals.push(local);
+        self.locals.len() - 1
+    }
+
+    pub fn resolve_local(&self, name: &str) -> Option<usize> {
+        for (i, local) in self.locals.iter().enumerate().rev() {
+            if local.name == name {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn add_upvalue(&mut self, index: usize, is_local: bool) -> usize {
+        for (i, upvalue) in self.upvalues.iter().enumerate() {
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i;
+            }
+        }
+        self.upvalues.push(CompilerUpvalue { index, is_local });
+        self.upvalues.len() - 1
+    }
+}
+
+pub struct CompilerState {
+    pub contexts: Vec<CompilerContext>,
+}
+
+impl CompilerState {
+    pub fn new() -> Self {
+        CompilerState {
+            contexts: vec![CompilerContext::new()],
+        }
+    }
+
+    pub fn current(&mut self) -> &mut CompilerContext {
+        self.contexts.last_mut().unwrap()
+    }
+
+    pub fn resolve_upvalue(&mut self, ctx_idx: usize, name: &str) -> Option<usize> {
+        if ctx_idx == 0 {
+            return None;
+        }
+
+        let parent_idx = ctx_idx - 1;
+
+        if let Some(local_idx) = self.contexts[parent_idx].resolve_local(name) {
+            return Some(self.contexts[ctx_idx].add_upvalue(local_idx, true));
+        }
+
+        if let Some(upvalue_idx) = self.resolve_upvalue(parent_idx, name) {
+            return Some(self.contexts[ctx_idx].add_upvalue(upvalue_idx, false));
+        }
+
+        None
+    }
+}
+
 pub fn compile(
     exp: &LispExp,
     chunk: &mut Chunk,
     is_tail: bool,
     heap: &mut Heap,
+    state: &mut CompilerState,
     previous_line: usize,
 ) -> Result<(), String> {
     let aritmethic_operators = ["+", "-", "*", "/"];
@@ -26,7 +118,15 @@ pub fn compile(
 
     match exp {
         LispExp::Symbol(s, _) => {
-            chunk.write(OpCode::GetVar(s.clone()), current_line);
+            let ctx_idx = state.contexts.len() - 1;
+
+            if let Some(local_idx) = state.contexts[ctx_idx].resolve_local(s) {
+                chunk.write(OpCode::GetLocal(local_idx), current_line);
+            } else if let Some(upvalue_idx) = state.resolve_upvalue(ctx_idx, s) {
+                chunk.write(OpCode::GetUpvalue(upvalue_idx), current_line);
+            } else {
+                chunk.write(OpCode::GetGlobal(s.clone()), current_line);
+            }
             if is_tail {
                 chunk.write(OpCode::Return, current_line);
             }
@@ -71,11 +171,17 @@ pub fn compile(
                 chunk,
                 is_tail,
                 heap,
+                state,
                 current_line,
             )?
         }
         LispExp::List(list, _) => {
             if list.is_empty() {
+                let const_idx = chunk.add_constant(Value::nil());
+                chunk.write(OpCode::Constant(const_idx), current_line);
+                if is_tail {
+                    chunk.write(OpCode::Return, current_line);
+                }
                 return Ok(());
             }
             let head = &list[0];
@@ -98,8 +204,16 @@ pub fn compile(
                     }
                     match &list[1] {
                         LispExp::Symbol(name, _) => {
-                            compile(&list[2], chunk, false, heap, current_line)?;
-                            chunk.write(OpCode::SetVar(name.clone()), current_line);
+                            compile(&list[2], chunk, false, heap, state, current_line)?;
+
+                            let ctx_idx = state.contexts.len() - 1;
+                            if let Some(local_idx) = state.contexts[ctx_idx].resolve_local(name) {
+                                chunk.write(OpCode::SetLocal(local_idx), current_line);
+                            } else if let Some(upvalue_idx) = state.resolve_upvalue(ctx_idx, name) {
+                                chunk.write(OpCode::SetUpvalue(upvalue_idx), current_line);
+                            } else {
+                                chunk.write(OpCode::SetGlobal(name.clone()), current_line);
+                            }
                             if is_tail {
                                 chunk.write(OpCode::Return, current_line);
                             }
@@ -109,8 +223,14 @@ pub fn compile(
                 }
                 LispExp::Symbol(s, _) if s == "define" => match &list[1] {
                     LispExp::Symbol(name, _) => {
-                        compile(&list[2], chunk, false, heap, current_line)?;
-                        chunk.write(OpCode::DefVar(name.clone()), current_line);
+                        compile(&list[2], chunk, false, heap, state, current_line)?;
+
+                        if state.current().scope_depth > 0 {
+                            state.current().add_local(name.clone());
+                        } else {
+                            chunk.write(OpCode::DefGlobal(name.clone()), current_line);
+                        }
+
                         if is_tail {
                             chunk.write(OpCode::Return, current_line);
                         }
@@ -124,19 +244,39 @@ pub fn compile(
                                     params.push(p_name.clone());
                                 }
                             }
+
+                            state.contexts.push(CompilerContext::new());
+                            state.current().scope_depth += 1;
+
+                            for p in &params {
+                                state.current().add_local(p.clone());
+                            }
+
                             let mut closure_chunk = Chunk::new();
                             for (i, body_exp) in list[2..].iter().enumerate() {
                                 let last = i == (list.len() - 3);
-                                compile(body_exp, &mut closure_chunk, last, heap, current_line)?;
+                                compile(
+                                    body_exp,
+                                    &mut closure_chunk,
+                                    last,
+                                    heap,
+                                    state,
+                                    current_line,
+                                )?;
                                 if !last {
                                     closure_chunk.write(OpCode::Pop, current_line);
                                 }
                             }
 
-                            chunk
-                                .code
-                                .push(OpCode::MakeClosure(params, Rc::new(closure_chunk)));
-                            chunk.write(OpCode::DefVar(name.clone()), current_line);
+                            let completed_ctx = state.contexts.pop().unwrap();
+
+                            chunk.code.push(OpCode::MakeClosure(
+                                params,
+                                Rc::new(closure_chunk),
+                                completed_ctx.upvalues,
+                            ));
+
+                            chunk.write(OpCode::DefGlobal(name.clone()), current_line);
                             if is_tail {
                                 chunk.write(OpCode::Return, current_line);
                             }
@@ -151,12 +291,12 @@ pub fn compile(
                         if s == "-" {
                             let idx = chunk.add_constant(Value::number(0.0));
                             chunk.write(OpCode::Constant(idx), current_line);
-                            compile(&list[1], chunk, false, heap, current_line)?;
+                            compile(&list[1], chunk, false, heap, state, current_line)?;
                             chunk.write(OpCode::Sub, current_line);
                         } else if s == "/" {
                             let idx = chunk.add_constant(Value::number(1.0));
                             chunk.write(OpCode::Constant(idx), current_line);
-                            compile(&list[1], chunk, false, heap, current_line)?;
+                            compile(&list[1], chunk, false, heap, state, current_line)?;
                             chunk.write(OpCode::Div, current_line);
                         } else {
                             return Err(format!("'{}' requires at least 2 arguments", s));
@@ -171,10 +311,10 @@ pub fn compile(
                     if list.len() < 3 {
                         return Err(format!("{} requires arguments", s));
                     }
-                    compile(&list[1], chunk, false, heap, current_line)?;
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
 
                     for arg in &list[2..] {
-                        compile(arg, chunk, false, heap, current_line)?;
+                        compile(arg, chunk, false, heap, state, current_line)?;
 
                         match s.as_str() {
                             "+" => chunk.write(OpCode::Add, current_line),
@@ -194,7 +334,7 @@ pub fn compile(
                         return Err(format!("{} requires at least 2 arguments", s));
                     }
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap, current_line)?;
+                        compile(arg, chunk, false, heap, state, current_line)?;
                     }
 
                     match s.as_str() {
@@ -219,7 +359,7 @@ pub fn compile(
                     }
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap, current_line)?;
+                        compile(arg, chunk, false, heap, state, current_line)?;
                     }
 
                     match s.as_str() {
@@ -234,12 +374,12 @@ pub fn compile(
                     }
                 }
                 LispExp::Symbol(s, _) if s == "if" => {
-                    compile(&list[1], chunk, false, heap, current_line)?; // condition
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // condition
 
                     let jump_if_false_idx = chunk.code.len();
                     chunk.write(OpCode::JumpIfFalse(0), current_line);
 
-                    compile(&list[2], chunk, is_tail, heap, current_line)?; // then
+                    compile(&list[2], chunk, is_tail, heap, state, current_line)?; // then
 
                     let jump_idx = chunk.code.len();
                     if !is_tail {
@@ -250,7 +390,7 @@ pub fn compile(
                     chunk.code[jump_if_false_idx] = OpCode::JumpIfFalse(chunk.code.len());
 
                     if list.len() > 3 {
-                        compile(&list[3], chunk, is_tail, heap, current_line)?;
+                        compile(&list[3], chunk, is_tail, heap, state, current_line)?;
                     } else if !is_tail {
                         let idx = chunk.add_constant(Value::void());
                         chunk.write(OpCode::Constant(idx), current_line);
@@ -268,29 +408,85 @@ pub fn compile(
                             }
                         }
                     }
+
+                    state.contexts.push(CompilerContext::new());
+                    state.current().scope_depth += 1;
+
+                    for p in &params {
+                        state.current().add_local(p.clone());
+                    }
+
                     let mut closure_chunk = Chunk::new();
-                    // Compila body. Apenas ultima exp é is_tail
+
                     for (i, body_exp) in list[2..].iter().enumerate() {
                         let last = i == (list.len() - 3);
-                        compile(body_exp, &mut closure_chunk, last, heap, current_line)?;
+                        compile(
+                            body_exp,
+                            &mut closure_chunk,
+                            last,
+                            heap,
+                            state,
+                            current_line,
+                        )?;
                         if !last {
                             closure_chunk.write(OpCode::Pop, current_line);
                         }
                     }
 
-                    chunk
-                        .code
-                        .push(OpCode::MakeClosure(params, Rc::new(closure_chunk)));
+                    let completed_ctx = state.contexts.pop().unwrap();
+                    chunk.code.push(OpCode::MakeClosure(
+                        params,
+                        Rc::new(closure_chunk),
+                        completed_ctx.upvalues,
+                    ));
 
                     if is_tail {
                         chunk.write(OpCode::Return, current_line);
                     }
                 }
+                LispExp::Symbol(s, _) if s == "let" => {
+                    let bindings = match &list[1] {
+                        LispExp::List(b, _) => b.clone(),
+                        LispExp::Nil => vec![],
+                        _ => {
+                            return Err("Malformed 'let' expression: expected bindings".to_string());
+                        }
+                    };
+
+                    let mut params = vec![];
+                    let mut args = vec![];
+
+                    for binding in bindings {
+                        if let LispExp::List(kv, _) = binding {
+                            params.push(kv[0].clone());
+                            args.push(kv[1].clone());
+                        } else {
+                            return Err(
+                                "Malformed 'let' expression: invalid binding format".to_string()
+                            );
+                        }
+                    }
+
+                    let mut lambda_list = vec![
+                        LispExp::Symbol("lambda".to_string(), 0),
+                        LispExp::List(params, 0),
+                    ];
+                    lambda_list.extend_from_slice(&list[2..]);
+                    let lambda_ast = LispExp::List(lambda_list, 0);
+
+                    let mut call_list = vec![lambda_ast];
+                    call_list.extend(args);
+                    let call_ast = LispExp::List(call_list, 0);
+
+                    compile(&call_ast, chunk, is_tail, heap, state, current_line)?;
+                    return Ok(());
+                }
+
                 _ => {
-                    compile(head, chunk, false, heap, current_line)?;
+                    compile(head, chunk, false, heap, state, current_line)?;
 
                     for arg in &list[1..] {
-                        compile(arg, chunk, false, heap, current_line)?;
+                        compile(arg, chunk, false, heap, state, current_line)?;
                     }
 
                     if is_tail {

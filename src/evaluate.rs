@@ -1,6 +1,6 @@
 use crate::{
     apply_macro, apply_procedure,
-    env::Env,
+    env::{Env, LispEnv},
     expand_quasiquote,
     expr::{LispExp, LispLambda},
     heap::Heap,
@@ -21,7 +21,10 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         LispExp::Native(_) => Ok(exp),
         LispExp::Lambda(_) => Ok(exp),
         LispExp::Macro(_) => Ok(exp),
-        LispExp::List(list, _) => {
+        LispExp::List(list, pos) => {
+            if list.is_empty() {
+                return Ok(LispExp::List(vec![], pos));
+            }
             let (head, tail) = list.split_first().ok_or("Cannot evaluate empty list '()")?;
 
             match head {
@@ -115,6 +118,41 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
                         body: Rc::new(body),
                         env: env.clone(),
                     }))
+                }
+
+                LispExp::Symbol(s, _) if s == "let" => {
+                    if tail.len() < 2 {
+                        return Err("'let' requires bindings and body".to_string());
+                    }
+
+                    // Cria um novo escopo temporário
+                    let mut new_env = LispEnv::new(Some(env.clone()));
+
+                    //  Resolve as variáveis (Parallel Binding)
+                    if let LispExp::List(bindings, _) = &tail[0] {
+                        for binding in bindings {
+                            if let LispExp::List(kv, _) = binding {
+                                if kv.len() == 2 {
+                                    if let LispExp::Symbol(name, _) = &kv[0] {
+                                        let val = eval(kv[1].clone(), env, heap)?;
+                                        new_env
+                                            .borrow_mut()
+                                            .insert(name.clone(), ast_to_value(&val, heap));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        return Err("Invalid let bindings".to_string());
+                    }
+
+                    // Executa o corpo sequencialmente no novo escopo
+                    let mut last_val = LispExp::Void;
+                    for exp in &tail[1..] {
+                        last_val = eval(exp.clone(), &mut new_env, heap)?;
+                    }
+
+                    return Ok(last_val);
                 }
                 LispExp::Symbol(s, line) if s == "defmacro" => {
                     let head_def = match &tail[0] {

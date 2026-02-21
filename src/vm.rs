@@ -1,3 +1,5 @@
+use crate::compiler::CompilerUpvalue;
+use crate::upvalue::{Upvalue, UpvalueState};
 use crate::{
     evaluate::eval,
     helpers::{ast_to_value, pairs_to_vec},
@@ -15,9 +17,14 @@ use crate::{
 pub enum OpCode {
     Constant(usize),
     Pop,
-    GetVar(String),
-    DefVar(String),
-    SetVar(String),
+    GetGlobal(String),
+    SetGlobal(String),
+    DefGlobal(String),
+    GetLocal(usize),
+    SetLocal(usize),
+    GetUpvalue(usize),
+    SetUpvalue(usize),
+    CloseUpvalue,
     Add,
     Sub,
     Mul,
@@ -36,7 +43,7 @@ pub enum OpCode {
     Call(usize),
     TailCall(usize),
     Return,
-    MakeClosure(Vec<String>, Rc<Chunk>),
+    MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
 }
 
 #[derive(Clone, Debug)]
@@ -77,12 +84,14 @@ impl Chunk {
 pub struct Vm {
     pub stack: Vec<Value>,
     pub frames: Vec<CallFrame>,
+    pub open_upvalues: Vec<Upvalue>,
 }
 
 pub struct CallFrame {
     pub chunk: Rc<Chunk>,
     pub ip: usize,
-    pub env: Env,
+    pub stack_offset: usize,
+    pub closure_upvalues: Vec<Upvalue>,
 }
 
 macro_rules! vm_math {
@@ -129,9 +138,37 @@ macro_rules! vm_cmp_n {
 impl Vm {
     pub fn new() -> Self {
         Vm {
-            stack: vec![],
+            stack: Vec::with_capacity(2048),
             frames: vec![],
+            open_upvalues: vec![],
         }
+    }
+
+    pub fn capture_upvalue(&mut self, local_idx: usize) -> Upvalue {
+        for upvalue in &self.open_upvalues {
+            if let UpvalueState::Open(idx) = *upvalue.state.borrow() {
+                if idx == local_idx {
+                    return upvalue.clone();
+                }
+            }
+        }
+
+        let created_upvalue = Upvalue::new_open(local_idx);
+        self.open_upvalues.push(created_upvalue.clone());
+        created_upvalue
+    }
+
+    pub fn close_upvalues(&mut self, last_stack_idx: usize) {
+        self.open_upvalues.retain(|upvalue| {
+            let mut state = upvalue.state.borrow_mut();
+            if let UpvalueState::Open(idx) = *state {
+                if idx >= last_stack_idx {
+                    *state = UpvalueState::Closed(self.stack[idx]);
+                    return false;
+                }
+            }
+            true
+        });
     }
 
     pub fn execute(
@@ -174,7 +211,14 @@ impl Vm {
         env: Env,
         heap: &mut Heap,
     ) -> Result<Value, String> {
-        self.frames.push(CallFrame { chunk, ip: 0, env });
+        if self.frames.is_empty() {
+            self.frames.push(CallFrame {
+                chunk,
+                ip: 0,
+                stack_offset: self.stack.len(),
+                closure_upvalues: vec![],
+            });
+        }
 
         loop {
             if self.frames.is_empty() {
@@ -191,21 +235,38 @@ impl Vm {
                     self.stack.push(val);
                 }
                 OpCode::Pop => _ = self.stack.pop(),
-                OpCode::GetVar(name) => {
-                    let val = LispEnv::get(&frame.env.borrow(), name)
-                        .ok_or_else(|| format!("Variable not found: {}", name))?;
+                OpCode::GetGlobal(name) => {
+                    let val = env.borrow().get(&name).unwrap_or(Value::void());
                     self.stack.push(val);
                 }
-                OpCode::DefVar(name) => {
-                    let val = self.stack.pop().unwrap_or(Value::void());
-                    frame.env.borrow_mut().data.insert(name.clone(), val);
+                OpCode::SetGlobal(name) => {
+                    let val = *self.stack.last().unwrap();
+                    let _ = env.borrow_mut().set(&name, val);
+                }
+                OpCode::DefGlobal(name) => {
+                    let val = self.stack.pop().unwrap();
+                    env.borrow_mut().insert(name.clone(), val);
                     self.stack.push(Value::void());
                 }
-                OpCode::SetVar(name) => {
-                    let val = self.stack.pop().unwrap_or(Value::void());
-                    // env_set(&frame.env, &name, val)?;
-                    frame.env.borrow_mut().set(&name, val)?;
-                    self.stack.push(Value::void());
+                OpCode::GetLocal(idx) => {
+                    let val = self.stack[frame.stack_offset + idx];
+                    self.stack.push(val);
+                    // unsafe {
+                    //     let val = self.stack.get_unchecked(frame.stack_offset + idx);
+                    //     self.stack.push(*val);
+                    // }
+                }
+                OpCode::SetLocal(idx) => {
+                    let val = self.stack[frame.stack_offset + idx];
+                    self.stack[frame.stack_offset + idx] = val;
+                }
+                OpCode::GetUpvalue(idx) => {
+                    let val = frame.closure_upvalues[*idx].get_value(&self.stack);
+                    self.stack.push(val);
+                }
+                OpCode::SetUpvalue(idx) => {
+                    let val = *self.stack.last().unwrap();
+                    frame.closure_upvalues[*idx].set_value(val, &mut self.stack);
                 }
                 OpCode::Add => vm_math!(+, self),
                 OpCode::Sub => vm_math!(-, self),
@@ -229,13 +290,10 @@ impl Vm {
                 OpCode::Call(arg_count) | OpCode::TailCall(arg_count) => {
                     let is_tail = matches!(op, OpCode::TailCall(_));
 
-                    let mut args = vec![];
-                    for _ in 0..*arg_count {
-                        args.push(self.stack.pop().unwrap());
-                    }
-                    args.reverse();
+                    // Os argumentos já estão no topo da pilha. A função está logo abaixo deles!
+                    let stack_offset = self.stack.len() - arg_count;
+                    let func_val = self.stack[stack_offset - 1];
 
-                    let func_val = self.stack.pop().unwrap_or(Value::void());
                     if !func_val.is_gc_ref() {
                         return Err("Object is not callable".to_string());
                     }
@@ -243,51 +301,102 @@ impl Vm {
                     let func_exp = heap.get(func_val).unwrap().clone();
                     match func_exp {
                         LispExp::Native(f) => {
-                            let curr_env = &mut self.frames.last_mut().unwrap().env;
-                            let result = f(&args, curr_env, heap)?;
+                            let args_slice = &self.stack[stack_offset..].to_vec();
+                            let mut temp_env = env.clone();
+                            let result = f(args_slice, &mut temp_env, heap)?;
 
                             if is_tail {
-                                self.frames.pop();
+                                let frame = self.frames.pop().unwrap();
+                                self.close_upvalues(frame.stack_offset);
+
+                                // TCO CORRETO: Apaga a pilha até o início do frame chamador!
+                                // Isso limpa o frame morto E a função nativa de uma vez só.
+                                if frame.stack_offset > 0 {
+                                    self.stack.truncate(frame.stack_offset - 1);
+                                } else {
+                                    self.stack.clear();
+                                }
+
                                 if self.frames.is_empty() {
                                     return Ok(result);
                                 }
+                            } else {
+                                // Chamada normal: Limpa apenas os argumentos e a função nativa
+                                self.stack.truncate(stack_offset - 1);
                             }
                             self.stack.push(result);
                         }
+                        // LispExp::Native(f) => {
+                        //     // Funções nativas do Rust recebem os argumentos por fatia (slice)
+                        //     let args_slice = &self.stack[stack_offset..].to_vec();
+                        //     let mut temp_env = env.clone();
+                        //     let result = f(args_slice, &mut temp_env, heap)?;
 
+                        //     // Limpa os argumentos e a função nativa da pilha
+                        //     self.stack.truncate(stack_offset - 1);
+
+                        //     if is_tail {
+                        //         let frame = self.frames.pop().unwrap();
+                        //         self.close_upvalues(frame.stack_offset);
+                        //         if self.frames.is_empty() {
+                        //             return Ok(result);
+                        //         }
+                        //     }
+                        //     self.stack.push(result);
+                        // }
                         LispExp::VmClosure {
                             params,
                             chunk,
-                            env: closure_env,
+                            upvalues,
                         } => {
-                            if args.len() != params.len() {
-                                return Err("Incorrect arity".to_string());
+                            if *arg_count != params.len() {
+                                return Err(format!(
+                                    "Incorrect arity. Expected {}, got {}",
+                                    params.len(),
+                                    arg_count
+                                ));
                             }
-                            let new_env = LispEnv::new(Some(closure_env));
-                            for (p, a) in params.iter().zip(args.iter()) {
-                                new_env.borrow_mut().data.insert(p.clone(), *a);
-                            }
+
                             if is_tail {
-                                let frame = self.frames.last_mut().unwrap();
-                                frame.ip = 0;
-                                frame.env = new_env;
-                                frame.chunk = chunk.clone();
-                            } else {
+                                let old_frame = self.frames.pop().unwrap();
+                                self.close_upvalues(old_frame.stack_offset);
+
+                                // TCO MÁGICO: Empurramos os argumentos novos para cima dos velhos!
+                                let new_args_start = stack_offset;
+                                let target_start = old_frame.stack_offset;
+
+                                for i in 0..*arg_count {
+                                    self.stack[target_start + i] = self.stack[new_args_start + i];
+                                }
+                                self.stack.truncate(target_start + *arg_count);
+
+                                // O novo frame reaproveita o espaço do antigo
                                 self.frames.push(CallFrame {
                                     chunk: chunk.clone(),
                                     ip: 0,
-                                    env: new_env,
+                                    stack_offset: target_start,
+                                    closure_upvalues: upvalues.clone(),
+                                });
+                            } else {
+                                // Chamada normal, cria um novo frame em cima da pilha atual
+                                self.frames.push(CallFrame {
+                                    chunk: chunk.clone(),
+                                    ip: 0,
+                                    stack_offset,
+                                    closure_upvalues: upvalues.clone(),
                                 });
                             }
                         }
                         LispExp::Lambda(lambda) => {
                             let mut new_env = LispEnv::new(Some(lambda.env.clone()));
                             let params_flat = pairs_to_vec(&*lambda.params, heap);
+
+                            let args_slice = &self.stack[stack_offset..];
                             if let LispExp::List(params, _) = params_flat {
-                                if args.len() != params.len() {
+                                if args_slice.len() != params.len() {
                                     return Err("Incorrect arity".to_string());
                                 }
-                                for (param, arg) in params.iter().zip(args.iter()) {
+                                for (param, arg) in params.iter().zip(args_slice.iter()) {
                                     if let LispExp::Symbol(name, _) = param {
                                         new_env.borrow_mut().insert(name.clone(), *arg);
                                     }
@@ -295,29 +404,95 @@ impl Vm {
                             }
 
                             let result_ast = eval((*lambda.body).clone(), &mut new_env, heap)?;
-                            let resul_val = ast_to_value(&result_ast, heap);
+                            let result_val = ast_to_value(&result_ast, heap);
 
                             if is_tail {
-                                self.frames.pop();
-                                if self.frames.is_empty() {
-                                    return Ok(resul_val);
+                                let frame = self.frames.pop().unwrap();
+                                self.close_upvalues(frame.stack_offset);
+
+                                if frame.stack_offset > 0 {
+                                    self.stack.truncate(frame.stack_offset - 1);
+                                } else {
+                                    self.stack.clear();
                                 }
+
+                                if self.frames.is_empty() {
+                                    return Ok(result_val);
+                                }
+                            } else {
+                                self.stack.truncate(stack_offset - 1);
                             }
-                            self.stack.push(resul_val);
-                        }
+                            self.stack.push(result_val);
+                        } //     LispExp::Lambda(lambda) => {
+                        //         // Interoperabilidade com funções antigas não-compiladas (Avaliador de Árvore)
+                        //         let mut new_env = LispEnv::new(Some(lambda.env.clone()));
+                        //         let params_flat = pairs_to_vec(&*lambda.params, heap);
+
+                        //         let args_slice = &self.stack[stack_offset..];
+                        //         if let LispExp::List(params, _) = params_flat {
+                        //             if args_slice.len() != params.len() {
+                        //                 return Err("Incorrect arity".to_string());
+                        //             }
+                        //             for (param, arg) in params.iter().zip(args_slice.iter()) {
+                        //                 if let LispExp::Symbol(name, _) = param {
+                        //                     new_env.borrow_mut().insert(name.clone(), *arg);
+                        //                 }
+                        //             }
+                        //         }
+
+                        //         let result_ast = eval((*lambda.body).clone(), &mut new_env, heap)?;
+                        //         let result_val = ast_to_value(&result_ast, heap);
+
+                        //         self.stack.truncate(stack_offset - 1);
+
+                        //         if is_tail {
+                        //             let frame = self.frames.pop().unwrap();
+                        //             self.close_upvalues(frame.stack_offset);
+                        //             if self.frames.is_empty() {
+                        //                 return Ok(result_val);
+                        //             }
+                        //         }
+                        //         self.stack.push(result_val);
+                        //     }
                         _ => return Err("Object is not callable".to_string()),
                     }
                 }
                 OpCode::Return => {
                     let result = self.stack.pop().unwrap_or(Value::void());
-                    self.frames.pop();
+                    let frame = self.frames.pop().unwrap();
+
+                    // O RESGATE: A função vai morrer, salvem os Post-its abertos!
+                    self.close_upvalues(frame.stack_offset);
+
+                    // Apaga a função e os argumentos locais da Pilha de forma ultra-rápida
+                    if frame.stack_offset > 0 {
+                        self.stack.truncate(frame.stack_offset - 1);
+                    }
+
                     self.stack.push(result);
+                    // let result = self.stack.pop().unwrap_or(Value::void());
+                    // self.frames.pop();
+                    // self.stack.push(result);
                 }
-                OpCode::MakeClosure(params, clos_chunk) => {
+                OpCode::MakeClosure(params, chunk, compiler_upvalues) => {
+                    let stack_offset = frame.stack_offset;
+                    let closure_upvalues = frame.closure_upvalues.clone();
+
+                    let mut runtime_upvalues = vec![];
+
+                    for cup in compiler_upvalues {
+                        if cup.is_local {
+                            let stack_idx = stack_offset + cup.index;
+                            runtime_upvalues.push(self.capture_upvalue(stack_idx));
+                        } else {
+                            runtime_upvalues.push(closure_upvalues[cup.index].clone());
+                        }
+                    }
+
                     let closure = LispExp::VmClosure {
                         params: params.clone(),
-                        chunk: clos_chunk.clone(),
-                        env: frame.env.clone(),
+                        chunk: chunk.clone(),
+                        upvalues: runtime_upvalues,
                     };
 
                     let clos_ptr = heap.alloc(closure);
@@ -329,16 +504,6 @@ impl Vm {
                     let pair_ptr = heap.alloc(LispExp::Pair(a, b));
                     self.stack.push(pair_ptr);
                 }
-                // OpCode::Car => {
-                //     let obj = self.stack.pop().unwrap_or(Value::void());
-                //     if obj.is_gc_ref() {
-                //         if let Some(LispExp::Pair(car, _cdr)) = heap.get(obj) {
-                //             self.stack.push(*car);
-                //             continue;
-                //         }
-                //     }
-                //     return Err("'car' requires a pair or list".to_string());
-                // }
                 OpCode::Car => {
                     let obj = self.stack.pop().unwrap_or(Value::void());
 
@@ -382,16 +547,8 @@ impl Vm {
                         }
                     }
                     return Err("'cdr' requires a pair or list".to_string());
-                } // OpCode::Cdr => {
-                  //     let obj = self.stack.pop().unwrap_or(Value::void());
-                  //     if obj.is_gc_ref() {
-                  //         if let Some(LispExp::Pair(_car, cdr)) = heap.get(obj) {
-                  //             self.stack.push(*cdr);
-                  //             continue;
-                  //         }
-                  //     }
-                  //     return Err("'cdr' requires a pair or list".to_string());
-                  // }
+                }
+                OpCode::CloseUpvalue => todo!(),
             }
         }
     }
@@ -402,9 +559,14 @@ impl Display for OpCode {
         match self {
             OpCode::Constant(_) => write!(f, "PUSH_CONST"),
             OpCode::Pop => write!(f, "POP"),
-            OpCode::GetVar(_) => write!(f, "GET_VAR"),
-            OpCode::DefVar(_) => write!(f, "DEF_VAR"),
-            OpCode::SetVar(_) => write!(f, "SET_VAR"),
+            OpCode::GetGlobal(_) => write!(f, "GET_GLOBAL"),
+            OpCode::SetGlobal(_) => write!(f, "SET_GLOBAL"),
+            OpCode::DefGlobal(_) => write!(f, "DEF_GLOBAL"),
+            OpCode::GetLocal(_) => write!(f, "GET_LOCAL"),
+            OpCode::SetLocal(_) => write!(f, "SET_LOCAL"),
+            OpCode::GetUpvalue(_) => write!(f, "GET_UPVALUE"),
+            OpCode::SetUpvalue(_) => write!(f, "SET_UPVALUE"),
+            OpCode::CloseUpvalue => write!(f, "CLOSE_UPVALUE"),
             OpCode::Add => write!(f, "ADD"),
             OpCode::Sub => write!(f, "SUB"),
             OpCode::Mul => write!(f, "MUL"),
@@ -420,7 +582,7 @@ impl Display for OpCode {
             OpCode::Call(_) => write!(f, "CALL"),
             OpCode::TailCall(_) => write!(f, "TAIL_CALL"),
             OpCode::Return => write!(f, "RETURN"),
-            OpCode::MakeClosure(_, _) => write!(f, "MAKE_CLOSURE"),
+            OpCode::MakeClosure(_, _, _) => write!(f, "MAKE_CLOSURE"),
             OpCode::Cons => write!(f, "CONS"),
             OpCode::Car => write!(f, "CAR"),
             OpCode::Cdr => write!(f, "CDR"),
@@ -442,9 +604,6 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
                 chunk.constants[*idx],
                 // lisp_fmt(chunk.constants[*idx], heap)
             ),
-            OpCode::GetVar(name) => println!("{:<18} '{}'", instruction, name),
-            OpCode::DefVar(name) => println!("{:<18} '{}'", instruction, name),
-            OpCode::SetVar(name) => println!("{:<18} '{}'", instruction, name),
             OpCode::JumpIfFalse(t) => println!("{:<18} {:04}", instruction, t),
             OpCode::Jump(t) => println!("{:<18} {:04}", instruction, t),
             OpCode::Call(n) => println!("{:<18} ({} args)", instruction, n),
@@ -461,7 +620,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Ge(n) => println!("{:<18} ({} args)", instruction, n),
             OpCode::Pop => println!("{}", instruction),
             OpCode::Return => println!("{}", instruction),
-            OpCode::MakeClosure(params, closure_chunk) => {
+            OpCode::MakeClosure(params, closure_chunk, upvalues) => {
                 println!("{:<18} {:?}", instruction, params);
                 println!("\n  [Closure Start {:?}]", params);
                 disassemble_chunk(closure_chunk, "Closure Body", heap);
@@ -470,6 +629,14 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Cons => println!("{}", instruction),
             OpCode::Car => println!("{}", instruction),
             OpCode::Cdr => println!("{}", instruction),
+            OpCode::GetGlobal(_) => todo!(),
+            OpCode::SetGlobal(_) => todo!(),
+            OpCode::DefGlobal(_) => todo!(),
+            OpCode::GetLocal(_) => todo!(),
+            OpCode::SetLocal(_) => todo!(),
+            OpCode::GetUpvalue(_) => todo!(),
+            OpCode::SetUpvalue(_) => todo!(),
+            OpCode::CloseUpvalue => todo!(),
         }
     }
     println!("======================\n");

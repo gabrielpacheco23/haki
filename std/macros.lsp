@@ -5,9 +5,9 @@
                 (list)
                 (cons (f (car L)) (map f (cdr L)))))
 
-(defmacro (let bindings &rest body)
-          (cons (cons 'lambda (cons (map car bindings) body))
-                (map cadr bindings)))
+; (defmacro (let bindings &rest body)
+;           (cons (cons 'lambda (cons (map car bindings) body))
+;                 (map cadr bindings)))
 
 (defmacro (let* bindings body)
   (if (null? bindings)

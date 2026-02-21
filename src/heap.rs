@@ -1,3 +1,4 @@
+use crate::upvalue::UpvalueState;
 use crate::value::Value;
 use crate::vm::{Chunk, OpCode};
 use crate::{env::Env, expr::LispExp};
@@ -98,23 +99,15 @@ impl Heap {
             LispExp::VmClosure {
                 params: _,
                 chunk,
-                env,
+                upvalues,
             } => {
-                let mut curr_env = Some(env.clone());
-                while let Some(env_ref) = curr_env {
-                    let env_borrowed = env_ref.borrow();
-
-                    for value in env_borrowed.data.values() {
-                        self.mark_val(*value);
+                for upvalue in upvalues {
+                    if let UpvalueState::Closed(val) = *upvalue.state.borrow() {
+                        self.mark_val(val);
                     }
-
-                    curr_env = env_borrowed.outer.clone();
                 }
 
                 self.mark_chunk(&chunk);
-                // for const_val in &chunk.constants {
-                //     self.mark_val(*const_val);
-                // }
             }
             _ => {}
         }
@@ -126,7 +119,7 @@ impl Heap {
         }
 
         for op in &chunk.code {
-            if let OpCode::MakeClosure(_, inner_chunk) = op {
+            if let OpCode::MakeClosure(_, inner_chunk, _upvals) = op {
                 self.mark_chunk(inner_chunk);
             }
         }

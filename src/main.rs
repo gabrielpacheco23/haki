@@ -1,4 +1,5 @@
-use crate::compiler::{compile, optimize_ast};
+#![allow(unused)]
+use crate::compiler::{CompilerState, compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
 use crate::expr::{LispExp, lisp_fmt};
@@ -19,6 +20,7 @@ mod env;
 mod evaluate;
 mod expr;
 mod heap;
+mod upvalue;
 
 #[macro_use]
 mod helpers;
@@ -53,6 +55,7 @@ pub fn run_source(
     let tokens = tokenize(source);
     let mut tokens_iter = tokens.into_iter().peekable();
     let mut vm = Vm::new();
+    let mut compiler_state = CompilerState::new();
     let mut last_result = Value::void();
 
     while tokens_iter.peek().is_some() {
@@ -72,7 +75,14 @@ pub fn run_source(
         if optimized_ast != LispExp::Void {
             let mut chunk = Chunk::new();
 
-            compile(&optimized_ast, &mut chunk, false, heap, 1)?;
+            compile(
+                &optimized_ast,
+                &mut chunk,
+                false,
+                heap,
+                &mut compiler_state,
+                1,
+            )?;
             // chunk.code.push(OpCode::Return);
             chunk.write(OpCode::Return, 1);
 

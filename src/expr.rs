@@ -1,5 +1,6 @@
 use crate::env::Env;
 use crate::heap::Heap;
+use crate::upvalue::Upvalue;
 use crate::value::Value;
 use crate::vm::Chunk;
 
@@ -34,7 +35,7 @@ pub enum LispExp {
     VmClosure {
         params: Vec<String>,
         chunk: Rc<Chunk>,
-        env: Env,
+        upvalues: Vec<Upvalue>,
     },
 }
 

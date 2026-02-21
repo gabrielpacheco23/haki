@@ -1,6 +1,7 @@
 use crate::eval;
 use crate::heap::Heap;
 use crate::value::Value;
+use crate::vm::CallFrame;
 use crate::{
     env::{Env, LispEnv},
     expr::*,
@@ -230,27 +231,35 @@ pub fn apply_procedure(
         LispExp::VmClosure {
             params,
             chunk,
-            env: closure_env,
+            upvalues,
         } => {
             if args.len() != params.len() {
                 return Err(format!(
-                    "Aridade incorreta. Esperava {}, recebeu {}",
+                    "Incorrect arity. Expected {}, got {}",
                     params.len(),
                     args.len()
                 ));
             }
-            let new_env = LispEnv::new(Some(closure_env.clone()));
-            for (p, a) in params.iter().zip(args.iter()) {
-                new_env
-                    .borrow_mut()
-                    .insert(p.clone(), ast_to_value(a, heap));
-            }
+
             let mut sub_vm = crate::vm::Vm::new();
-            let result_val = sub_vm.execute(chunk.clone(), new_env, heap, false)?;
+
+            sub_vm.stack.push(Value::void());
+            for arg in args {
+                sub_vm.stack.push(ast_to_value(arg, heap));
+            }
+
+            sub_vm.frames.push(CallFrame {
+                chunk: chunk.clone(),
+                ip: 0,
+                stack_offset: 1, // Os argumentos começam no índice 1
+                closure_upvalues: upvalues.clone(),
+            });
+
+            let result_val = sub_vm.execute(chunk.clone(), env.clone(), heap, false)?;
             Ok(value_to_ast(result_val, heap))
         }
         _ => Err(format!(
-            "Objeto '{}' não é uma função chamável in eval",
+            "Object'{}' is not callable in eval",
             lisp_fmt(ast_to_value(proc, heap), heap)
         )),
     }
