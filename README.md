@@ -93,11 +93,11 @@ Haki have two pipe operators: |> (thread-first) and |>> (thread-last).
 ```
 
 ### 4. JSON & Web Requests
-Haki is ready for the web. Use the native shell bridge and JSON parser to interact with APIs.
+Haki is ready for the web. Use the native http-get and JSON parser to interact with APIs.
 
 ```scheme
 ;; Fetch data from an API and parse it natively
-(define raw-response (shell "curl -s https://dummyjson.com/products/1"))
+(define raw-response (http-get "https://dummyjson.com/products/1"))
 (define product (parse-json raw-response))
 
 (display "Product Name: ")
