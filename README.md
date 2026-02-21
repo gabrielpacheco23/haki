@@ -75,13 +75,14 @@ Clean up your logic with the built-in `match` macro.
   (_                 (displayln "Unknown action")))
 ```
 
-### 3. The Pipe Operator
+### 3. The Pipe Operators
 Read your functional data transformations from top to bottom, not inside out.
+Haki have two pipe operators: |> (thread-first) and |>> (thread-last)
 
 ```scheme
-;; Using the pipe operator |>
+;; Using the pipe operator |>> (thread-last)
 (define sum-of-evens
-  (|> [1 2 3 4 5 6]
+  (|>> [1 2 3 4 5 6]
       (vector->list)
       (filter even?)
       (map (lambda (x) (* x 10)))
