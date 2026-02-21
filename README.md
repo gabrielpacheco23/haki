@@ -77,7 +77,8 @@ Clean up your logic with the built-in `match` macro.
 
 ### 3. The Pipe Operators
 Read your functional data transformations from top to bottom, not inside out.
-Haki have two pipe operators: |> (thread-first) and |>> (thread-last)
+
+Haki have two pipe operators: |> (thread-first) and |>> (thread-last).
 
 ```scheme
 ;; Using the pipe operator |>> (thread-last)
