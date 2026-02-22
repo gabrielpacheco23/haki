@@ -250,8 +250,11 @@ impl Vm {
                 }
                 OpCode::Pop => _ = self.stack.pop(),
                 OpCode::GetGlobal(name) => {
-                    let val = env.borrow().get(&name).unwrap_or(Value::void());
-                    self.stack.push(val);
+                    if let Some(val) = env.borrow().get(name) {
+                        self.stack.push(val);
+                    } else {
+                        return Err(format!("Variable not found: {}", name));
+                    }
                 }
                 OpCode::SetGlobal(name) => {
                     let val = *self.stack.last().unwrap();

@@ -1,4 +1,4 @@
-(load "ydotool.scm")
+(require "ydotool.hk")
 
 (define target-app "Artix Game Launcher")
 

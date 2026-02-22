@@ -236,8 +236,15 @@ pub fn compile(
                         }
                     }
                     LispExp::List(header, _) if !header.is_empty() => {
-                        // syntatic sugar
                         if let LispExp::Symbol(name, _) = &header[0] {
+                            // Registramos a função ANTES de compilar o corpo.
+                            // Isso permite que o 'iter' ache a si mesmo (Recursão Local)
+                            let mut is_local = false;
+                            if state.current().scope_depth > 0 {
+                                state.current().add_local(name.clone());
+                                is_local = true;
+                            }
+
                             let mut params = vec![];
                             for p in &header[1..] {
                                 if let LispExp::Symbol(p_name, _) = p {
@@ -263,7 +270,18 @@ pub fn compile(
                                     state,
                                     current_line,
                                 )?;
-                                if !last {
+
+                                // Previne o Pop para os defines internos da função
+                                let mut is_define = false;
+                                if let LispExp::List(l, _) = body_exp {
+                                    if let Some(LispExp::Symbol(s, _)) = l.first() {
+                                        if s == "define" {
+                                            is_define = true;
+                                        }
+                                    }
+                                }
+
+                                if !last && !is_define {
                                     closure_chunk.write(OpCode::Pop, current_line);
                                 }
                             }
@@ -276,13 +294,65 @@ pub fn compile(
                                 completed_ctx.upvalues,
                             ));
 
-                            chunk.write(OpCode::DefGlobal(name.clone()), current_line);
+                            // Se NÃO for local (estiver na raiz), criamos Globalmente
+                            if !is_local {
+                                chunk.write(OpCode::DefGlobal(name.clone()), current_line);
+                            }
+
                             if is_tail {
                                 chunk.write(OpCode::Return, current_line);
                             }
                         } else {
                             return Err("Invalid procedure name".to_string());
                         }
+
+                        // syntatic sugar
+                        // if let LispExp::Symbol(name, _) = &header[0] {
+                        //     let mut params = vec![];
+                        //     for p in &header[1..] {
+                        //         if let LispExp::Symbol(p_name, _) = p {
+                        //             params.push(p_name.clone());
+                        //         }
+                        //     }
+
+                        //     state.contexts.push(CompilerContext::new());
+                        //     state.current().scope_depth += 1;
+
+                        //     for p in &params {
+                        //         state.current().add_local(p.clone());
+                        //     }
+
+                        //     let mut closure_chunk = Chunk::new();
+                        //     for (i, body_exp) in list[2..].iter().enumerate() {
+                        //         let last = i == (list.len() - 3);
+                        //         compile(
+                        //             body_exp,
+                        //             &mut closure_chunk,
+                        //             last,
+                        //             heap,
+                        //             state,
+                        //             current_line,
+                        //         )?;
+                        //         if !last {
+                        //             closure_chunk.write(OpCode::Pop, current_line);
+                        //         }
+                        //     }
+
+                        //     let completed_ctx = state.contexts.pop().unwrap();
+
+                        //     chunk.code.push(OpCode::MakeClosure(
+                        //         params,
+                        //         Rc::new(closure_chunk),
+                        //         completed_ctx.upvalues,
+                        //     ));
+
+                        //     chunk.write(OpCode::DefGlobal(name.clone()), current_line);
+                        //     if is_tail {
+                        //         chunk.write(OpCode::Return, current_line);
+                        //     }
+                        // } else {
+                        //     return Err("Invalid procedure name".to_string());
+                        // }
                     }
                     _ => return Err("Invalid define".to_string()),
                 },
@@ -428,7 +498,17 @@ pub fn compile(
                             state,
                             current_line,
                         )?;
-                        if !last {
+
+                        let mut is_define = false;
+                        if let LispExp::List(l, _) = body_exp {
+                            if let Some(LispExp::Symbol(s, _)) = l.first() {
+                                if s == "define" {
+                                    is_define = true;
+                                }
+                            }
+                        }
+
+                        if !last && !is_define {
                             closure_chunk.write(OpCode::Pop, current_line);
                         }
                     }

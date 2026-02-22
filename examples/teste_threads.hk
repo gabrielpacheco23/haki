@@ -1,0 +1,25 @@
+(displayln "[Main] A iniciar o sistema...")
+
+;; Inicia a Thread 1
+(define pid-1 
+  (spawn 
+    (lambda ()
+      (displayln "[Thread 1] Olá, eu sou um processo paralelo!")
+      (let ((msg (receive)))
+        (display "[Thread 1] A minha missão é: ") (displayln msg)))))
+
+;; Inicia a Thread 2
+(define pid-2 
+  (spawn 
+    (lambda ()
+      (displayln "[Thread 2] Eu sou outro processo totalmente isolado.")
+      (let ((msg (receive)))
+        (display "[Thread 2] A minha missão é: ") (displayln msg)))))
+
+(displayln "[Main] Os processos estão a rodar. A enviar ordens...")
+
+(send pid-1 "Analisar ficheiros")
+(send pid-2 "Fazer requisições HTTP")
+
+(sleep 2000)
+(displayln "[Main] Fim do teste.")
