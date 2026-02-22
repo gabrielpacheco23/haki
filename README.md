@@ -8,8 +8,11 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 
 * **Custom Garbage Collector:** A built-in Mark-and-Sweep GC utilizing a flat memory Arena. Replaces Rust's standard reference counting (`Rc`/`RefCell`) for blazing-fast allocations, zero memory fragmentation, and perfect circular reference resolution.
 * **Bytecode Virtual Machine:** Code is compiled into optimized OpCodes and executed on a stack-based VM.
+* **True Lexical Scoping & Upvalues:** Fast closure captures via a robust upvalue system in the VM, completely eliminating costly environment hash-map lookups for local variables.
+* **Actor Model Concurrency:** Erlang-style "share nothing" parallelism. Spawn fully isolated VMs in background OS threads that communicate safely via message passing (`send` and `receive`) without mutex locks.
 * **Tail Call Optimization (TCO):** Write infinite recursive loops without ever blowing up the call stack. Memory stays at O(1).
 * **Compile-Time Optimizations:** Features Constant Folding (e.g., `(+ 1 (* 2 3))` is optimized to `7` before the VM even sees it).
+* **Native HTTP Server:** Built-in TCP web server capabilities, enabling you to write asynchronous backends and APIs directly in Lisp.
 * **Data Literals:** Native support for contiguous Vectors `[]` and HashMaps `{}` straight in the parser, making data manipulation a breeze.
 * **Pattern Matching:** A powerful `match` macro for elegant control flow and variable binding.
 * **The Pipe Operator (`|>`):** Thread data through multiple functions sequentially, avoiding the dreaded "Lisp parenthesis pyramid".
@@ -78,7 +81,7 @@ Clean up your logic with the built-in `match` macro.
 ### 3. The Pipe Operators
 Read your functional data transformations from top to bottom, not inside out.
 
-Haki have two pipe operators: |> (thread-first) and |>> (thread-last).
+Haki have two pipe operators: `|>` (thread-first) and `|>>` (thread-last).
 
 ```scheme
 ;; Using the pipe operator |>> (thread-last)
@@ -93,7 +96,7 @@ Haki have two pipe operators: |> (thread-first) and |>> (thread-last).
 ```
 
 ### 4. JSON & Web Requests
-Haki is ready for the web. Use the native http-get and JSON parser to interact with APIs.
+Haki is ready for the web. Use the native `http-get` and JSON parser to interact with APIs.
 
 ```scheme
 ;; Fetch data from an API and parse it natively
@@ -104,6 +107,34 @@ Haki is ready for the web. Use the native http-get and JSON parser to interact w
 (displayln (hash-ref product "title"))
 ```
 
+### 5. Actor Model Concurrency
+Haki achieves thread-safe parallelism using the Erlang Actor Model. You can spawn isolated background processes that share no memory and communicate exclusively via a mailbox.
+
+```scheme
+;; Spawn a new isolated thread
+(define worker-pid 
+  (spawn (lambda ()
+    (displayln "[Worker] Waiting for tasks...")
+    (let ((msg (receive)))
+      (displayln (string-append "[Worker] Task completed: " msg))))))
+
+;; Send a message to the worker from the main thread
+(send worker-pid "Process Data")
+```
+
+### 6. Native Web Server
+Haki provides native TCP sockets, allowing you to spin up web servers directly from your scripts without needing external dependencies.
+
+```scheme
+(displayln "Server running on http://localhost:8080")
+
+(start-server 8080 (lambda (req)
+  (let ((path (hash-ref req "path")))
+    (if (equal? path "/api")
+        "{\"status\": \"ok\", \"haki\": true}"
+        "<h1>Hello from Haki Lisp!</h1>"))))
+```
+
 ## 🧠 Architecture
 
 Even as a toy project, Haki implements a full-fledged compilation pipeline rather than a simple tree-walking interpreter:
@@ -112,8 +143,8 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 2. **Parser:** Builds the Abstract Syntax Tree (AST), translating `[]` and `{}` into Lisp function calls.
 3. **Macro Expander:** A powerful hygienic pass that resolves `defmacro`, translating constructs like `cond`, `let`, `match`, and `|>` into core Lisp expressions.
 4. **Optimizer:** Bottom-up AST traversal to perform Constant Folding.
-5. **Compiler:** Translates the optimized AST into linear Bytecode (`Chunk` of `OpCodes`).
-6. **Virtual Machine (VM) & GC:** Executes instructions using a pre-allocated stack. Memory is strictly managed by a custom flat-array Arena and a Mark-and-Sweep Garbage Collector, keeping the runtime exceptionally fast and memory-safe.
+5. **Compiler:** Translates the optimized AST into linear Bytecode (`Chunk` of `OpCodes`), resolving lexical scopes and generating Upvalues.
+6. **Virtual Machine (VM), GC & Actors:** Executes instructions using a pre-allocated stack. Memory is strictly managed by a custom flat-array Arena and a Mark-and-Sweep Garbage Collector. Background threads (`spawn`) spin up entirely new, isolated VM instances for safe, lock-free concurrency.
 
 ## 🚧 Future Roadmap (TODOs)
 
