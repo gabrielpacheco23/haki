@@ -1,0 +1,67 @@
+
+;; ==========================================
+;; MINI-REDIS: Banco de Dados em Haki Lisp
+;; ==========================================
+(displayln "Iniciando sistema...")
+
+;; 1. O SERVIDOR DO BANCO DE DADOS (Ator Isolado)
+(define db-pid
+  (spawn
+    (lambda ()
+      ;; A memória do banco! Absolutamente ninguém de fora tem acesso a este Dicionário.
+      (let ((memoria (make-hash)))
+        
+        ;; O Loop de Eventos do Banco de Dados
+        (define (loop)
+          (let* ((msg (receive))
+                 ;; Lemos a string da mensagem e quebramos por espaço
+                 ;; Ex: "SET nome Haki" vira '("SET" "nome" "Haki")
+                 (cmd (string-split msg " "))) 
+            
+            (cond
+              ;; Comando SET: Grava no banco
+              ((equal? (car cmd) "SET")
+               ;; cadr pega o 2º item (chave), (car (cdr (cdr cmd))) pega o 3º item (valor)
+               (hash-set! memoria (cadr cmd) (car (cdr (cdr cmd))))
+               (display "[DB] Chave gravada com sucesso: ") (displayln (cadr cmd)))
+              
+              ;; Comando GET: Lê do banco
+              ((equal? (car cmd) "GET")
+               (display "[DB] Consulta de '") (display (cadr cmd)) (display "': ")
+               (displayln (hash-ref memoria (cadr cmd))))
+              
+              ;; Comando STOP: Desliga o banco
+              ((equal? (car cmd) "STOP")
+               (displayln "[DB] Desligando o banco de dados com seguranca...")
+               (exit 0))
+               
+              (else
+               (displayln "[DB] Comando desconhecido!")))
+            
+            ;; O banco volta a dormir esperando a proxima transacao
+            (loop)))
+            
+        (displayln "[DB] Servidor de Banco de Dados online na memoria!")
+        (loop)))))
+
+;; ==========================================
+;; 2. O CLIENTE (A nossa Thread Principal)
+;; ==========================================
+
+;; Damos um tempo para a Thread do DB instanciar sua Máquina Virtual
+(sleep 500) 
+
+(displayln "\n[Main] Sou o cliente. Vou enviar requisicoes simultaneas para o DB...")
+
+;; Enviamos transações de gravação assíncronas
+(send db-pid "SET linguagem HakiLisp")
+(send db-pid "SET arquitetura ActorModel")
+(send db-pid "SET criador Gabriel")
+
+;; Enviamos transações de leitura
+(send db-pid "GET linguagem")
+(send db-pid "GET criador")
+(send db-pid "GET versao") ;; Vai retornar () pois não existe
+
+(sleep 1000)
+(send db-pid "STOP")

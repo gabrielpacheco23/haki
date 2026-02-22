@@ -9,24 +9,36 @@
 ;           (cons (cons 'lambda (cons (map car bindings) body))
 ;                 (map cadr bindings)))
 
-(defmacro (let* bindings body)
+(defmacro (let* bindings &rest body)
   (if (null? bindings)
-      `(let () ,body)
-      `(let (,(car bindings))
-         (let* ,(cdr bindings) ,body))))
-           
+      (cons 'let (cons '() body))
+      (list 'let (list (car bindings))
+            (cons 'let* (cons (cdr bindings) body)))))
+
 (defmacro (cond &rest clauses)
   (if (null? clauses)
       '()
       (let ((clause (car clauses))
             (rest   (cdr clauses)))
         (if (equal? (car clause) 'else)
-            (cadr clause)
+            (cons 'let (cons '() (cdr clause)))
             (list 'if 
                   (car clause)        
-                  (cadr clause)       
-                  (cons 'cond rest)   
-            )))))
+                  (cons 'let (cons '() (cdr clause)))       
+                  (cons 'cond rest))))))
+
+; (defmacro (cond &rest clauses)
+;   (if (null? clauses)
+;       '()
+;       (let ((clause (car clauses))
+;             (rest   (cdr clauses)))
+;         (if (equal? (car clause) 'else)
+;             (cadr clause)
+;             (list 'if 
+;                   (car clause)        
+;                   (cadr clause)       
+;                   (cons 'cond rest)   
+;             )))))
 
 (defmacro (and &rest args)
   (if (null? args)
@@ -191,3 +203,9 @@
            (lambda () ,try-expr)
            (lambda (,err-var) ,(cons 'begin catch-body)))
         (error "Malformed try block. Expected: (try expr (catch var ...))"))))
+
+;; ==========================================
+;; CONCORRÊNCIA ERLANG - ERGONOMIA
+;; ==========================================
+(defmacro (spawn func)
+  `(spawn-native (quote ,func)))

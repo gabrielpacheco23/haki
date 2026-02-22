@@ -12,12 +12,12 @@
 (define quests-array (hash-ref payload "quests_concluidas"))
 
 (define quests-de-foco
-  (|> quests-array
+  (|>> quests-array
       (vector->list)
       (filter (λ (q) (equal? (hash-ref q "tipo") "foco")))))
 
 (define xp-ganho
-  (|> quests-de-foco
+  (|>> quests-de-foco
       (map (λ (q) (hash-ref q "xp")))
       (fold + 0)))
 

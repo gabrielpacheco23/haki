@@ -7,6 +7,8 @@
 
 ; (define cadr (lambda (x) (car (cdr x))))
 
+; (define (caddr x) (car (cdr (cdr x))))
+
 (define (not x)
   (if x #f #t))
 

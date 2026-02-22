@@ -1,5 +1,5 @@
 
-(define arquivos-brutos (shell "ls -1 *.scm"))
+(define arquivos-brutos (shell "ls -1 *.hk"))
 (define lista-arquivos (string-split arquivos-brutos "\n"))
 
 (define (nao-vazio? str)
@@ -13,11 +13,6 @@
         (let ((linhas (string-split conteudo "\n")))
           (length linhas))
         0)))
-
-; (define (contar-linhas nome-arquivo)
-;   (let* ((conteudo (slurp nome-arquivo))
-;         (linhas (string-split conteudo "\n")))
-;     (length linhas)))
 
 (define linhas-por-arquivo (map contar-linhas arquivos-validos))
 

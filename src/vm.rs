@@ -250,8 +250,11 @@ impl Vm {
                 }
                 OpCode::Pop => _ = self.stack.pop(),
                 OpCode::GetGlobal(name) => {
-                    let val = env.borrow().get(&name).unwrap_or(Value::void());
-                    self.stack.push(val);
+                    if let Some(val) = env.borrow().get(name) {
+                        self.stack.push(val);
+                    } else {
+                        return Err(format!("Variable not found: {}", name));
+                    }
                 }
                 OpCode::SetGlobal(name) => {
                     let val = *self.stack.last().unwrap();
@@ -660,14 +663,14 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Cons => println!("{}", instruction),
             OpCode::Car => println!("{}", instruction),
             OpCode::Cdr => println!("{}", instruction),
-            OpCode::GetGlobal(_) => todo!(),
-            OpCode::SetGlobal(_) => todo!(),
-            OpCode::DefGlobal(_) => todo!(),
-            OpCode::GetLocal(_) => todo!(),
-            OpCode::SetLocal(_) => todo!(),
-            OpCode::GetUpvalue(_) => todo!(),
-            OpCode::SetUpvalue(_) => todo!(),
-            OpCode::CloseUpvalue => todo!(),
+            OpCode::GetGlobal(name) => println!("{} '{}'", instruction, name),
+            OpCode::SetGlobal(name) => println!("{} '{}'", instruction, name),
+            OpCode::DefGlobal(name) => println!("{} '{}'", instruction, name),
+            OpCode::GetLocal(idx) => println!("{}({})", instruction, idx),
+            OpCode::SetLocal(idx) => println!("{}({})", instruction, idx),
+            OpCode::GetUpvalue(idx) => println!("{}({})", instruction, idx),
+            OpCode::SetUpvalue(idx) => println!("{}({})", instruction, idx),
+            OpCode::CloseUpvalue => println!("{}", instruction),
         }
     }
     println!("======================\n");

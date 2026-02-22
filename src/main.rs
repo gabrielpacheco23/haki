@@ -43,6 +43,11 @@ fn run_script(path: &str, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
     run_source(&content, env, ExecMode::Normal, heap, false, false)
 }
 
+fn run_code(code: &str, mut env: Env, heap: &mut Heap) -> Result<Value, String> {
+    let result_val = run_source(code, &mut env, ExecMode::Normal, heap, false, false)?;
+    Ok(ast_to_value(&result_val, heap))
+}
+
 pub fn run_source(
     source: &str,
     env: &mut Env,

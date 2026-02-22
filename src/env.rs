@@ -1,5 +1,5 @@
 use crate::value::Value;
-use crate::{arithmetic_op, def_fold1};
+use crate::{arithmetic_op, def_fold1, run_code};
 use rand::RngExt;
 use regex::Regex;
 
@@ -13,6 +13,12 @@ use std::time::Duration;
 use std::{collections::HashMap as RustHashMap, rc::Rc};
 
 use std::process::Command;
+
+use std::sync::{Mutex, OnceLock, mpsc};
+
+static ACTOR_REGISTRY: OnceLock<Mutex<RustHashMap<usize, mpsc::Sender<String>>>> = OnceLock::new();
+
+static NEXT_PID: OnceLock<Mutex<usize>> = OnceLock::new();
 
 macro_rules! add_native {
     ($env:ident, $heap:ident, $name:expr, $func:expr) => {
@@ -28,6 +34,7 @@ pub struct LispEnv {
     pub data: RustHashMap<String, Value>,
     pub outer: Option<Env>,
     pub loaded_files: HashSet<String>,
+    pub mailbox: Option<Rc<RefCell<mpsc::Receiver<String>>>>,
 }
 
 impl LispEnv {
@@ -36,6 +43,7 @@ impl LispEnv {
             data: RustHashMap::new(),
             loaded_files: HashSet::new(),
             outer,
+            mailbox: None,
         }))
     }
 
@@ -1142,6 +1150,104 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
             }
             Ok(Value::void())
+        });
+
+        // ==========================================
+        // CONCORRÊNCIA (ERLANG ACTOR MODEL)
+        // ==========================================
+
+        add_native!(env, heap, "spawn-native", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'spawn-native' requires 1 argument".to_string());
+            }
+
+            let lambda_str = lisp_fmt(args[0], h).to_string();
+            let (tx, rx) = mpsc::channel::<String>();
+            let pid = {
+                let mutex = NEXT_PID.get_or_init(|| Mutex::new(1));
+                let mut guard = mutex.lock().unwrap();
+                let p = *guard;
+                *guard += 1;
+                p
+            };
+
+            let reg = ACTOR_REGISTRY.get_or_init(|| Mutex::new(RustHashMap::new()));
+
+            reg.lock().unwrap().insert(pid, tx);
+
+            std::thread::spawn(move || {
+                let mut new_heap = Heap::new();
+                let new_env = standard_env(&mut new_heap);
+                new_env.borrow_mut().mailbox = Some(Rc::new(RefCell::new(rx)));
+
+                let _ = run_script(
+                    "/home/pachequinho/Documents/rustprojs/haki/std/macros.lsp",
+                    &mut new_env.clone(),
+                    &mut new_heap,
+                );
+                let _ = run_script(
+                    "/home/pachequinho/Documents/rustprojs/haki/std/lib.lsp",
+                    &mut new_env.clone(),
+                    &mut new_heap,
+                );
+
+                let code_to_run = format!("({})", lambda_str);
+
+                if let Err(e) = run_code(&code_to_run, new_env, &mut new_heap) {
+                    eprintln!("[Actor {} Failed] {}", pid, e);
+                }
+            });
+            Ok(Value::number(pid as f64))
+        });
+
+        add_native!(env, heap, "send", |args, _, h| {
+            if args.len() != 2 {
+                return Err("'send' requires (pid msg)".to_string());
+            }
+            if !args[0].is_number() {
+                return Err("'send' PID must be a number".to_string());
+            }
+
+            let pid = args[0].as_number() as usize;
+
+            // Aceita qualquer tipo como mensagem, mas converte para String para a viagem pelas threads
+            let msg = if let Some(LispExp::Str(s)) = h.get(args[1]) {
+                s.clone()
+            } else {
+                lisp_fmt(args[1], h).to_string()
+            };
+
+            let reg = ACTOR_REGISTRY.get_or_init(|| Mutex::new(RustHashMap::new()));
+            if let Some(tx) = reg.lock().unwrap().get(&pid) {
+                let _ = tx.send(msg); // Despacha a mensagem
+                Ok(Value::boolean(true))
+            } else {
+                Ok(Value::boolean(false)) // O PID não existe ou o ator já morreu
+            }
+        });
+
+        add_native!(env, heap, "receive", |_, env_ref, h| {
+            // Recurso genial: Procura a caixa de correio subindo pelo escopo
+            fn get_rx(env: &Env) -> Option<Rc<RefCell<mpsc::Receiver<String>>>> {
+                let e = env.borrow();
+                if let Some(ref rx) = e.mailbox {
+                    Some(rx.clone())
+                } else if let Some(ref outer) = e.outer {
+                    get_rx(outer)
+                } else {
+                    None
+                }
+            }
+
+            if let Some(rx) = get_rx(env_ref) {
+                // TRAVA o ator atual. Ele não faz nada até uma mensagem cair na caixa!
+                match rx.borrow().recv() {
+                    Ok(msg) => Ok(h.alloc_string(msg)),
+                    Err(_) => Err("Mailbox closed".to_string()),
+                }
+            } else {
+                Err("This process has no mailbox!".to_string())
+            }
         });
     }
 
