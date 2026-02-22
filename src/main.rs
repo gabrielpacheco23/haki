@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::compiler::{CompilerState, compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
@@ -19,6 +20,7 @@ mod env;
 mod evaluate;
 mod expr;
 mod heap;
+mod jit;
 mod upvalue;
 
 #[macro_use]
@@ -102,7 +104,7 @@ pub fn run_source(
     Ok(value_to_ast(last_result, heap))
 }
 
-fn main() {
+fn main2() {
     let mut heap = Heap::new();
     let mut global_env = standard_env(&mut heap);
 
@@ -126,4 +128,29 @@ fn main() {
     } else {
         repl(global_env, &mut heap)
     }
+}
+
+fn main() {
+    test_jit();
+}
+
+fn test_jit() {
+    let mut chunk = crate::vm::Chunk::new();
+
+    // Simula: (+ 10 20)
+    let idx_10 = chunk.add_constant(Value::number(10.0));
+    let idx_20 = chunk.add_constant(Value::number(20.0));
+
+    chunk.write(OpCode::Constant(idx_10), 1);
+    chunk.write(OpCode::Constant(idx_20), 1);
+    chunk.write(OpCode::Add, 1);
+    chunk.write(OpCode::Return, 1);
+
+    let mut jit = crate::jit::CompilerJIT::new();
+    jit.compile(&chunk);
+
+    println!(
+        "Resultado do JIT (Direto do Silício!): {:?}",
+        jit.execute().unwrap().as_number()
+    );
 }
