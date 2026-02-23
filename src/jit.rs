@@ -163,6 +163,7 @@ impl CompilerJIT {
         let cdr_ptr = jit_cdr as *const () as u64;
         let display_ptr = jit_display as *const () as u64;
         let newline_ptr = jit_newline as *const () as u64;
+        let string_eq_ptr = jit_string_eq as *const () as u64;
 
         for (ip, instruction) in chunk.code.iter().enumerate() {
             // ancoramos a label da instrução atual na memoria
@@ -584,6 +585,29 @@ impl CompilerJIT {
                         ; mov rsp, r14
                     );
                 }
+
+                OpCode::StringEq => {
+                    dynasm!(self.ops
+                        ; pop rsi                        // tira o argumento B (topo da stack)
+                        ; pop rdi                        // tira o argumento A
+                        ; mov rdx, QWORD heap_addr as _  // o ponteiro do Heap
+                        ; mov r15, QWORD string_eq_ptr as _
+
+                        // C-ABI (alinhamento da stack)
+                        ; mov r14, rsp
+                        ; and rsp, -16
+                        ; call r15
+                        ; mov rsp, r14
+
+                        // target guard para strings
+                        ; mov rcx, QWORD bailout_code as _
+                        ; cmp rax, rcx
+                        ; je =>bailout_label
+
+                        // se não, empurra #t ou #f de volta
+                        ; push rax
+                    );
+                }
                 OpCode::Return => {
                     dynasm!(self.ops
                         ; pop rax
@@ -658,6 +682,7 @@ pub fn can_jit(chunk: &Chunk) -> bool {
             | OpCode::Cdr
             | OpCode::Display
             | OpCode::Newline
+            | OpCode::StringEq
             | OpCode::Pop => continue,
             _ => return false,
         }

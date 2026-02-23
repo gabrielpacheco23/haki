@@ -486,6 +486,19 @@ pub fn compile(
                     }
                 }
 
+                LispExp::Symbol(s, _) if s == "string=?" => {
+                    if list.len() != 3 {
+                        return Err("'string=?' requires exactly 2 arguments".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    compile(&list[2], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::StringEq, current_line);
+
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
                 LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap, state, current_line)?; // condition
 

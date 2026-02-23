@@ -1,0 +1,8 @@
+(define (procura-palavra iteracoes alvo atual)
+  (if (= iteracoes 0)
+      (displayln "Busca terminada.")
+      (if (string=? alvo atual)
+          (procura-palavra (- iteracoes 1) alvo atual)
+          (displayln "Não encontrou!"))))
+
+(time (procura-palavra 5000000 "Haki" "Haki"))

@@ -1,6 +1,6 @@
 use crate::compiler::CompilerUpvalue;
 use crate::debug;
-use crate::expr::lisp_fmt;
+use crate::expr::{is_deep_equal, lisp_fmt};
 use crate::heap::collect_garbage;
 use crate::jit::{CompilerJIT, JitResult};
 use crate::upvalue::{Upvalue, UpvalueState};
@@ -49,6 +49,7 @@ pub enum OpCode {
     Return,
     Display,
     Newline,
+    StringEq,
     MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
 }
 
@@ -615,6 +616,13 @@ impl Vm {
                     self.stack.push(Value::void());
                 }
                 OpCode::Newline => println!(),
+                OpCode::StringEq => {
+                    let b = self.stack.pop().unwrap_or(Value::void());
+                    let a = self.stack.pop().unwrap_or(Value::void());
+
+                    let is_eq = is_deep_equal(a, b, heap);
+                    self.stack.push(Value::boolean(is_eq));
+                }
             }
         }
     }
@@ -654,6 +662,7 @@ impl Display for OpCode {
             OpCode::Cdr => write!(f, "CDR"),
             OpCode::Display => write!(f, "DISPLAY"),
             OpCode::Newline => write!(f, "NEWLINE"),
+            OpCode::StringEq => write!(f, "STRING_EQ"),
         }
     }
 }
@@ -707,6 +716,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::CloseUpvalue => println!("{}", instruction),
             OpCode::Display => println!("{}", instruction),
             OpCode::Newline => println!("{}", instruction),
+            OpCode::StringEq => println!("{}", instruction),
         }
     }
     println!("======================\n");
