@@ -6,18 +6,11 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 
 ## ✨ Key Features
 
-* **Custom Garbage Collector:** A built-in Mark-and-Sweep GC utilizing a flat memory Arena. Replaces Rust's standard reference counting (`Rc`/`RefCell`) for blazing-fast allocations, zero memory fragmentation, and perfect circular reference resolution.
-* **Bytecode Virtual Machine:** Code is compiled into optimized OpCodes and executed on a stack-based VM.
-* **True Lexical Scoping & Upvalues:** Fast closure captures via a robust upvalue system in the VM, completely eliminating costly environment hash-map lookups for local variables.
+* **JIT Compiler (New!):** Inspects hot loops, tail-calls, and heavy math, compiling them on-the-fly directly to x86_64 Assembly for native execution speeds.
+* **Bytecode VM & Custom GC:** Code is compiled into optimized OpCodes and executed on a stack-based VM, managed by a blazing-fast, built-in Mark-and-Sweep Garbage Collector utilizing a flat memory Arena.
 * **Actor Model Concurrency:** Erlang-style "share nothing" parallelism. Spawn fully isolated VMs in background OS threads that communicate safely via message passing (`send` and `receive`) without mutex locks.
 * **Tail Call Optimization (TCO):** Write infinite recursive loops without ever blowing up the call stack. Memory stays at O(1).
-* **Compile-Time Optimizations:** Features Constant Folding (e.g., `(+ 1 (* 2 3))` is optimized to `7` before the VM even sees it).
-* **Native HTTP Server:** Built-in TCP web server capabilities, enabling you to write asynchronous backends and APIs directly in Lisp.
-* **Data Literals:** Native support for contiguous Vectors `[]` and HashMaps `{}` straight in the parser, making data manipulation a breeze.
-* **Pattern Matching:** A powerful `match` macro for elegant control flow and variable binding.
-* **The Pipe Operator (`|>`):** Thread data through multiple functions sequentially, avoiding the dreaded "Lisp parenthesis pyramid".
-* **Native JSON Support:** Integration with Rust's `serde_json` to parse internet payloads directly into Lisp AST structures.
-* **Interactive REPL:** A beautiful, colored terminal interface built with `rustyline`, featuring multi-line validation, persistent history, and real-time bracket matching.
+* **Web & Data Ready:** Built-in TCP web server capabilities, native JSON parsing, structural data literals (`[]`, `{}`), and pipe operators (`|>`, `|>>`) for clean data transformations.
 
 ## 🚀 Quick Start
 
@@ -25,8 +18,6 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 Clone the repository and install it globally using Cargo:
 
 ```bash
-git clone https://github.com/gabrielpacheco23/haki.git
-cd haki
 cargo install --path .
 ```
 
@@ -100,7 +91,7 @@ Haki is ready for the web. Use the native `http-get` and JSON parser to interact
 
 ```scheme
 ;; Fetch data from an API and parse it natively
-(define raw-response (http-get "https://dummyjson.com/products/1"))
+(define raw-response (http-get "[https://dummyjson.com/products/1](https://dummyjson.com/products/1)"))
 (define product (parse-json raw-response))
 
 (display "Product Name: ")
@@ -142,9 +133,10 @@ Even as a toy project, Haki implements a full-fledged compilation pipeline rathe
 1. **Lexer/Tokenizer:** Reads the `.hk` source code and breaks it down.
 2. **Parser:** Builds the Abstract Syntax Tree (AST), translating `[]` and `{}` into Lisp function calls.
 3. **Macro Expander:** A powerful hygienic pass that resolves `defmacro`, translating constructs like `cond`, `let`, `match`, and `|>` into core Lisp expressions.
-4. **Optimizer:** Bottom-up AST traversal to perform Constant Folding.
+4. **Optimizer:** Bottom-up AST traversal to perform Constant Folding and AST-level inlining (`define-inline`).
 5. **Compiler:** Translates the optimized AST into linear Bytecode (`Chunk` of `OpCodes`), resolving lexical scopes and generating Upvalues.
-6. **Virtual Machine (VM), GC & Actors:** Executes instructions using a pre-allocated stack. Memory is strictly managed by a custom flat-array Arena and a Mark-and-Sweep Garbage Collector. Background threads (`spawn`) spin up entirely new, isolated VM instances for safe, lock-free concurrency.
+6. **JIT Compiler:** Inspects emitted chunks and compiles stable loops and math operations directly to machine code (`dynasmrt`), skipping the VM entirely for maximum performance.
+7. **Virtual Machine (VM), GC & Actors:** Executes instructions using a pre-allocated stack. Memory is strictly managed by a custom flat-array Arena and a Mark-and-Sweep Garbage Collector. Background threads (`spawn`) spin up entirely new, isolated VM instances for safe, lock-free concurrency.
 
 ## 🚧 Future Roadmap (TODOs)
 
@@ -155,7 +147,7 @@ Haki is pretty much functional, but its not yet a full mature programming langua
 - [x] **NaN Tagging (Optimization):** Optimize the memory footprint of `LispExp` down to 8 bytes by packing pointers and booleans inside the unused bits of an `f64` float.
 
 ## 🤝 Contributing
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/gabrielpacheco23/haki/issues).
+Contributions, issues, and feature requests are welcome!
 
 ---
 *Developed with willpower.* ⚓
