@@ -10,6 +10,29 @@ extern "C" fn fmod_jit(a: f64, b: f64) -> f64 {
     a % b
 }
 
+extern "C" fn jit_display(val: u64, heap_ptr: *const Heap) -> u64 {
+    use std::io::Write;
+    let v: Value = unsafe { mem::transmute(val) };
+    let heap = unsafe { &*heap_ptr };
+
+    if v.is_gc_ref() {
+        if let Some(LispExp::Str(s)) = heap.get(v) {
+            print!("{}", s);
+            std::io::stdout().flush().unwrap(); // Força a exibição imediata no terminal
+            return unsafe { mem::transmute(Value::void()) };
+        }
+    }
+
+    print!("{}", lisp_fmt(v, heap));
+    std::io::stdout().flush().unwrap();
+    unsafe { mem::transmute(Value::void()) }
+}
+
+extern "C" fn jit_newline() -> u64 {
+    println!();
+    unsafe { mem::transmute(Value::void()) }
+}
+
 extern "C" fn jit_car(pair_val: u64, heap_ptr: *const Heap) -> u64 {
     let val: Value = unsafe { mem::transmute(pair_val) };
     let heap = unsafe { &*heap_ptr };
@@ -138,7 +161,8 @@ impl CompilerJIT {
 
         let car_ptr = jit_car as *const () as u64;
         let cdr_ptr = jit_cdr as *const () as u64;
-        let display_ptr = jit_displayln as *const () as u64;
+        let display_ptr = jit_display as *const () as u64;
+        let newline_ptr = jit_newline as *const () as u64;
 
         for (ip, instruction) in chunk.code.iter().enumerate() {
             // ancoramos a label da instrução atual na memoria
@@ -535,22 +559,31 @@ impl CompilerJIT {
                         ; push rax
                     );
                 }
+                OpCode::Display => {
+                    dynasm!(self.ops
+                        ; pop rdi
+                        ; mov rsi, QWORD heap_addr as _
+                        ; mov r15, QWORD display_ptr as _
 
-                // TODO:
-                // OpCode::Display => {
-                //     dynasm!(self.ops
-                //         ; pop rdi
-                //         ; mov rsi, QWORD heap_addr as _
-                //         ; mov r15, QWORD display_ptr as _
+                        // C-ABI
+                        ; mov r14, rsp
+                        ; and rsp, -16
+                        ; call r15
+                        ; mov rsp, r14
 
-                //         ; mov r14, rsp
-                //         ; and rsp, -16
-                //         ; call r15
-                //         ; mov rsp, r14
-
-                //         ; push rax // Retorna Void
-                //     );
-                // }
+                        ; push rax // Retorna Void
+                    );
+                }
+                OpCode::Newline => {
+                    dynasm!(self.ops
+                        ; mov r15, QWORD newline_ptr as _
+                        // C-ABI
+                        ; mov r14, rsp
+                        ; and rsp, -16
+                        ; call r15
+                        ; mov rsp, r14
+                    );
+                }
                 OpCode::Return => {
                     dynasm!(self.ops
                         ; pop rax
@@ -592,7 +625,11 @@ impl CompilerJIT {
 
 pub fn can_jit(chunk: &Chunk) -> bool {
     for constant in &chunk.constants {
-        if !constant.is_number() && !constant.is_boolean() {
+        if !constant.is_number()
+            && !constant.is_boolean()
+            && !constant.is_void()
+            && !constant.is_gc_ref()
+        {
             return false;
         }
     }
@@ -619,6 +656,8 @@ pub fn can_jit(chunk: &Chunk) -> bool {
             | OpCode::Call(_)
             | OpCode::Car
             | OpCode::Cdr
+            | OpCode::Display
+            | OpCode::Newline
             | OpCode::Pop => continue,
             _ => return false,
         }

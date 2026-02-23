@@ -444,6 +444,48 @@ pub fn compile(
                         chunk.write(OpCode::Return, current_line);
                     }
                 }
+
+                LispExp::Symbol(s, _) if s == "begin" => {
+                    if list.len() == 1 {
+                        let idx = chunk.add_constant(Value::void());
+                        chunk.write(OpCode::Constant(idx), current_line);
+                        if is_tail {
+                            chunk.write(OpCode::Return, current_line);
+                        }
+                        return Ok(());
+                    }
+
+                    for (i, expr) in list[1..].iter().enumerate() {
+                        let last = i == list.len() - 2;
+                        // O último item herda o is_tail do bloco inteiro
+                        compile(expr, chunk, last && is_tail, heap, state, current_line)?;
+                        // Joga os retornos inúteis fora, exceto o do último item
+                        if !last {
+                            chunk.write(OpCode::Pop, current_line);
+                        }
+                    }
+                }
+
+                LispExp::Symbol(s, _) if s == "display" || s == "displayln" => {
+                    // Compila e imprime cada argumento numa sequência
+                    for arg in &list[1..] {
+                        compile(arg, chunk, false, heap, state, current_line)?;
+                        chunk.write(OpCode::Display, current_line);
+                        chunk.write(OpCode::Pop, current_line); // Pop no Void gerado pelo display
+                    }
+
+                    if s == "displayln" {
+                        chunk.write(OpCode::Newline, current_line);
+                    }
+
+                    // A instrução retorna Void no final
+                    let idx = chunk.add_constant(Value::void());
+                    chunk.write(OpCode::Constant(idx), current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
                 LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap, state, current_line)?; // condition
 

@@ -1,0 +1,9 @@
+
+(define (contagem-regressiva n)
+  (if (= n 0)
+      (displayln "Decolagem!")
+      (begin
+        (displayln "Contagem: " n)
+        (contagem-regressiva (- n 1)))))
+
+(time (contagem-regressiva 100))

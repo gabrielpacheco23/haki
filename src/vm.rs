@@ -1,5 +1,6 @@
 use crate::compiler::CompilerUpvalue;
 use crate::debug;
+use crate::expr::lisp_fmt;
 use crate::heap::collect_garbage;
 use crate::jit::{CompilerJIT, JitResult};
 use crate::upvalue::{Upvalue, UpvalueState};
@@ -46,6 +47,8 @@ pub enum OpCode {
     Call(usize),
     TailCall(usize),
     Return,
+    Display,
+    Newline,
     MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
 }
 
@@ -266,7 +269,6 @@ impl Vm {
                     env.borrow_mut().insert(name.clone(), val);
                     self.stack.push(Value::void());
                 }
-                // TODO: MAYBE CONSIDER USING get_unchecked?
                 OpCode::GetLocal(idx) => {
                     let val = self.stack[frame.stack_offset + idx];
                     self.stack.push(val);
@@ -598,6 +600,21 @@ impl Vm {
                     return Err("'cdr' requires a pair or list".to_string());
                 }
                 OpCode::CloseUpvalue => todo!(),
+                OpCode::Display => {
+                    let val = self.stack.pop().unwrap_or(Value::void());
+                    if val.is_gc_ref() {
+                        if let Some(LispExp::Str(s)) = heap.get(val) {
+                            print!("{}", s); // Sem aspas!
+                        } else {
+                            print!("{}", lisp_fmt(val, heap));
+                        }
+                    } else {
+                        print!("{}", lisp_fmt(val, heap));
+                    }
+                    // A instrução devolve Void
+                    self.stack.push(Value::void());
+                }
+                OpCode::Newline => println!(),
             }
         }
     }
@@ -635,6 +652,8 @@ impl Display for OpCode {
             OpCode::Cons => write!(f, "CONS"),
             OpCode::Car => write!(f, "CAR"),
             OpCode::Cdr => write!(f, "CDR"),
+            OpCode::Display => write!(f, "DISPLAY"),
+            OpCode::Newline => write!(f, "NEWLINE"),
         }
     }
 }
@@ -686,6 +705,8 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::GetUpvalue(idx) => println!("{}({})", instruction, idx),
             OpCode::SetUpvalue(idx) => println!("{}({})", instruction, idx),
             OpCode::CloseUpvalue => println!("{}", instruction),
+            OpCode::Display => println!("{}", instruction),
+            OpCode::Newline => println!("{}", instruction),
         }
     }
     println!("======================\n");
