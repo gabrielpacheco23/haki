@@ -58,9 +58,6 @@ extern "C" fn jit_cdr(pair_val: u64, heap_ptr: *const Heap) -> u64 {
     0xBADBADBADBADBADB
 }
 
-// ==========================================
-// FFI PARA I/O E STRINGS
-// ==========================================
 extern "C" fn jit_displayln(val: u64, heap_ptr: *const Heap) -> u64 {
     let v: Value = unsafe { mem::transmute(val) };
     let heap = unsafe { &*heap_ptr };
@@ -82,6 +79,21 @@ extern "C" fn jit_string_eq(val_a: u64, val_b: u64, heap_ptr: *const Heap) -> u6
         }
     }
     0xBADBADBADBADBADB // Bailout se não forem strings
+}
+
+extern "C" fn jit_sin(val: u64) -> u64 {
+    let v: Value = unsafe { mem::transmute(val) };
+    if !v.is_number() {
+        return 0xBADBADBADBADBADB;
+    }
+    unsafe { mem::transmute(Value::number(v.as_number().sin())) }
+}
+extern "C" fn jit_cos(val: u64) -> u64 {
+    let v: Value = unsafe { mem::transmute(val) };
+    if !v.is_number() {
+        return 0xBADBADBADBADBADB;
+    }
+    unsafe { mem::transmute(Value::number(v.as_number().cos())) }
 }
 
 pub enum JitResult {
@@ -164,6 +176,8 @@ impl CompilerJIT {
         let display_ptr = jit_display as *const () as u64;
         let newline_ptr = jit_newline as *const () as u64;
         let string_eq_ptr = jit_string_eq as *const () as u64;
+        let sin_ptr = jit_sin as *const () as u64;
+        let cos_ptr = jit_cos as *const () as u64;
 
         for (ip, instruction) in chunk.code.iter().enumerate() {
             // ancoramos a label da instrução atual na memoria
@@ -610,6 +624,46 @@ impl CompilerJIT {
                     );
                 }
 
+                OpCode::Sqrt => {
+                    dynasm!(self.ops
+                        ; pop rax
+                        ; movq xmm0, rax
+
+                        // type guard
+                        // ; ucomisd xmm0, xmm0
+                        // ; jp =>bailout_label
+
+                        ; sqrtsd xmm0, xmm0
+                        ; movq rax, xmm0
+                        ; push rax
+                    );
+                }
+
+                OpCode::Sin | OpCode::Cos => {
+                    let ptr = if matches!(instruction, OpCode::Sin) {
+                        sin_ptr
+                    } else {
+                        cos_ptr
+                    };
+
+                    dynasm!(self.ops
+                        ; pop rdi
+                        ; mov r15, QWORD ptr as _
+
+                        ; mov r14, rsp
+                        ; and rsp, -16
+                        ; call r15
+                        ; mov rsp, r14
+
+                        ; mov rcx, QWORD bailout_code as _
+                        ; cmp rax, rcx
+                        ; je =>bailout_label
+
+                        ; push rax
+
+                    );
+                }
+
                 OpCode::Return => {
                     dynasm!(self.ops
                         ; pop rax
@@ -685,6 +739,9 @@ pub fn can_jit(chunk: &Chunk) -> bool {
             | OpCode::Display
             | OpCode::Newline
             | OpCode::StringEq
+            | OpCode::Sqrt
+            | OpCode::Sin
+            | OpCode::Cos
             | OpCode::Pop => continue,
             _ => return false,
         }

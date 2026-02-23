@@ -224,3 +224,11 @@
                ,(cons 'begin body)
                (__loop (cdr l))))))
      (__loop __lst)))
+
+ ;; ==========================================
+;; DEFUN - Suporte ao estilo Common Lisp
+;; Uso: (defun soma (a b) (+ a b))
+;; ==========================================
+(defmacro (defun nome args &rest corpo)
+  `(define ,(cons nome args)
+     ,(cons 'begin corpo)))

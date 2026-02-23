@@ -498,6 +498,25 @@ pub fn compile(
                         chunk.write(OpCode::Return, current_line);
                     }
                 }
+                LispExp::Symbol(s, _) if s == "sqrt" || s == "sin" || s == "cos" => {
+                    if list.len() != 2 {
+                        return Err(format!("'{}' exige exatamente 1 argumento", s));
+                    }
+
+                    // Compila o argumento matemático
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+
+                    match s.as_str() {
+                        "sqrt" => chunk.write(OpCode::Sqrt, current_line),
+                        "sin" => chunk.write(OpCode::Sin, current_line),
+                        "cos" => chunk.write(OpCode::Cos, current_line),
+                        _ => unreachable!(),
+                    }
+
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
 
                 LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap, state, current_line)?; // condition

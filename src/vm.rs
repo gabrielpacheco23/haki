@@ -34,6 +34,9 @@ pub enum OpCode {
     Mul,
     Div,
     Mod,
+    Sqrt,
+    Sin,
+    Cos,
     Eq(usize),
     Lt(usize),
     Le(usize),
@@ -620,6 +623,18 @@ impl Vm {
                     let is_eq = is_deep_equal(a, b, heap);
                     self.stack.push(Value::boolean(is_eq));
                 }
+                OpCode::Sqrt => {
+                    let val = self.stack.pop().unwrap_or(Value::number(0.0));
+                    self.stack.push(Value::number(val.as_number().sqrt()));
+                }
+                OpCode::Sin => {
+                    let val = self.stack.pop().unwrap_or(Value::number(0.0));
+                    self.stack.push(Value::number(val.as_number().sin()));
+                }
+                OpCode::Cos => {
+                    let val = self.stack.pop().unwrap_or(Value::number(0.0));
+                    self.stack.push(Value::number(val.as_number().cos()));
+                }
             }
         }
     }
@@ -660,6 +675,9 @@ impl Display for OpCode {
             OpCode::Display => write!(f, "DISPLAY"),
             OpCode::Newline => write!(f, "NEWLINE"),
             OpCode::StringEq => write!(f, "STRING_EQ"),
+            OpCode::Sqrt => write!(f, "SQRT"),
+            OpCode::Sin => write!(f, "SIN "),
+            OpCode::Cos => write!(f, "COS"),
         }
     }
 }
@@ -714,6 +732,9 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Display => println!("{}", instruction),
             OpCode::Newline => println!("{}", instruction),
             OpCode::StringEq => println!("{}", instruction),
+            OpCode::Sqrt => println!("{}", instruction),
+            OpCode::Sin => println!("{}", instruction),
+            OpCode::Cos => println!("{}", instruction),
         }
     }
     println!("======================\n");
