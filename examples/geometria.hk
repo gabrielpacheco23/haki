@@ -1,33 +1,12 @@
- ; (define (loop-dist iter x1 y1 x2 y2)
- ;   (if (= iter 0)
- ;       (displayln "Fim!")
- ;       (begin
- ;         ;; A matemática inlinada! O JIT engole isso perfeitamente.
- ;         (sqrt (+ (* (- x2 x1) (- x2 x1)) (* (- y2 y1) (- y2 y1))))
- ;         (loop-dist (- iter 1) x1 y1 x2 y2))))
-
-
- ; (time (loop-dist 5000000 10.5 20.2 55.0 100.8))
-
- ; (display "Seno de 1.57 = ")
- ; ; (displayln (sin 1.57079632679))
- ; (displayln (sin 90))
-
-(define (distancia x1 y1 x2 y2)
+(inline (distancia x1 y1 x2 y2)
   (sqrt (+ (* (- x2 x1) (- x2 x1)) 
            (* (- y2 y1) (- y2 y1)))))
 
-(define (loop-dist iter)
+(define (loop-dist iter x1 y1 x2 y2)
   (if (= iter 0)
-      (displayln "Fim dos calculos!")
+      (displayln "Fim!")
       (begin
-        (distancia 10.5 20.2 55.0 100.8)
-        (loop-dist (- iter 1)))))
+        (distancia x1 y1 x2 y2)        ;; Inlined (can use JIT)!
+        (loop-dist (- iter 1) x1 y1 x2 y2))))
 
-(time (loop-dist 5000000))
-
-(display "Distancia de (0,0) a (3,4) = ")
-(displayln (distancia 0.0 0.0 3.0 4.0))
-
-(display "Seno de 1.57 = ")
-(displayln (sin 1.57079632679))
+(time (loop-dist 5000000 10.5 20.2 55.0 100.8))

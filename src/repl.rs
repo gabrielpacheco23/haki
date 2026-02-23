@@ -7,6 +7,7 @@ use rustyline::validate::Validator;
 use rustyline::{Editor, Helper};
 use std::borrow::Cow;
 
+use crate::compiler::CompilerState;
 use crate::expr::lisp_fmt;
 use crate::heap::Heap;
 use crate::helpers::ast_to_value;
@@ -34,6 +35,7 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
     let _ = rl.load_history("history.txt");
 
     let mut buffer = String::new();
+    let mut compiler_state = CompilerState::new();
 
     loop {
         let prompt = if buffer.is_empty() {
@@ -84,7 +86,7 @@ pub fn repl(mut env: Env, heap: &mut Heap) {
                         (ExecMode::Normal, code_to_run)
                     };
 
-                    match run_source(code, &mut env, mode, heap, false, true) {
+                    match run_source(code, &mut env, mode, heap, false, &mut compiler_state, true) {
                         Ok(val) => {
                             if mode == ExecMode::Normal && !matches!(val, LispExp::Void) {
                                 println!(

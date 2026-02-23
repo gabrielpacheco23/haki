@@ -1,9 +1,9 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::{
     expr::LispExp,
     heap::Heap,
-    helpers::{pairs_to_vec, vec_to_pairs},
+    helpers::{ast_to_value, pairs_to_vec, value_to_ast, vec_to_pairs},
     value::Value,
     vm::{Chunk, OpCode},
 };
@@ -65,14 +65,22 @@ impl CompilerContext {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct InlineDef {
+    pub params: Vec<String>,
+    pub body: Vec<LispExp>,
+}
+
 pub struct CompilerState {
     pub contexts: Vec<CompilerContext>,
+    pub inline_registry: HashMap<String, InlineDef>,
 }
 
 impl CompilerState {
     pub fn new() -> Self {
         CompilerState {
             contexts: vec![CompilerContext::new()],
+            inline_registry: HashMap::new(),
         }
     }
 
@@ -221,6 +229,31 @@ pub fn compile(
                         _ => return Err("Invalid set!".to_string()),
                     }
                 }
+                LispExp::Symbol(s, _) if s == "inline" => match &list[1] {
+                    LispExp::List(header, _) if !header.is_empty() => {
+                        if let LispExp::Symbol(name, _) = &header[0] {
+                            let mut params = vec![];
+                            for p in &header[1..] {
+                                if let LispExp::Symbol(p_name, _) = p {
+                                    params.push(p_name.clone());
+                                }
+                            }
+                            let body = list[2..].to_vec();
+                            state
+                                .inline_registry
+                                .insert(name.clone(), InlineDef { params, body });
+                            let idx = chunk.add_constant(Value::void());
+                            chunk.write(OpCode::Constant(idx), current_line);
+                            if is_tail {
+                                chunk.write(OpCode::Return, current_line);
+                            }
+                            return Ok(());
+                        } else {
+                            return Err("Invalid name for inline".to_string());
+                        }
+                    }
+                    _ => return Err("Invalid syntax for inline".to_string()),
+                },
                 LispExp::Symbol(s, _) if s == "define" => match &list[1] {
                     LispExp::Symbol(name, _) => {
                         compile(&list[2], chunk, false, heap, state, current_line)?;
@@ -646,6 +679,37 @@ pub fn compile(
                     return Ok(());
                 }
                 _ => {
+                    if let LispExp::Symbol(name, _) = head {
+                        if let Some(inline_def) = state.inline_registry.get(name).cloned() {
+                            let args = &list[1..];
+                            if args.len() != inline_def.params.len() {
+                                return Err(format!(
+                                    "'{}' expected {} arguments",
+                                    name,
+                                    inline_def.params.len()
+                                ));
+                            }
+
+                            // Substitui as variáveis da matemática e compila direto
+                            for (i, expr) in inline_def.body.iter().enumerate() {
+                                let sub_expr = substitute_ast(expr, &inline_def.params, args, heap);
+                                let last = i == inline_def.body.len() - 1;
+                                compile(
+                                    &sub_expr,
+                                    chunk,
+                                    last && is_tail,
+                                    heap,
+                                    state,
+                                    current_line,
+                                )?;
+                                if !last {
+                                    chunk.write(OpCode::Pop, current_line);
+                                }
+                            }
+                            return Ok(()); // Acabou. Nada de OpCode::Call
+                        }
+                    }
+
                     compile(head, chunk, false, heap, state, current_line)?;
 
                     for arg in &list[1..] {
@@ -747,5 +811,37 @@ pub fn optimize_ast(ast: LispExp) -> LispExp {
         }
 
         _ => ast,
+    }
+}
+
+pub fn substitute_ast(
+    ast: &LispExp,
+    params: &[String],
+    args: &[LispExp],
+    heap: &mut Heap,
+) -> LispExp {
+    match ast {
+        LispExp::Symbol(s, _) => {
+            if let Some(pos) = params.iter().position(|p| p == s) {
+                args[pos].clone()
+            } else {
+                ast.clone()
+            }
+        }
+        LispExp::List(list, line) => {
+            let new_list = list
+                .iter()
+                .map(|item| substitute_ast(item, params, args, heap))
+                .collect();
+            LispExp::List(new_list, *line)
+        }
+
+        LispExp::Pair(car, cdr) => {
+            let new_car = substitute_ast(&value_to_ast(*car, heap), params, args, heap);
+            let new_cdr = substitute_ast(&value_to_ast(*cdr, heap), params, args, heap);
+            LispExp::Pair(ast_to_value(&new_car, heap), ast_to_value(&new_cdr, heap))
+        }
+
+        _ => ast.clone(),
     }
 }

@@ -43,11 +43,27 @@ fn run_script(path: &str, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Error reading the file '{}': {}", path, e))?;
 
-    run_source(&content, env, ExecMode::Normal, heap, false, false)
+    run_source(
+        &content,
+        env,
+        ExecMode::Normal,
+        heap,
+        false,
+        &mut CompilerState::new(),
+        false,
+    )
 }
 
 fn run_code(code: &str, mut env: Env, heap: &mut Heap) -> Result<Value, String> {
-    let result_val = run_source(code, &mut env, ExecMode::Normal, heap, false, false)?;
+    let result_val = run_source(
+        code,
+        &mut env,
+        ExecMode::Normal,
+        heap,
+        false,
+        &mut CompilerState::new(),
+        false,
+    )?;
     Ok(ast_to_value(&result_val, heap))
 }
 
@@ -57,12 +73,13 @@ pub fn run_source(
     mode: ExecMode,
     heap: &mut Heap,
     debug_gc: bool,
+    compiler_state: &mut CompilerState,
     is_repl: bool,
 ) -> Result<LispExp, String> {
     let tokens = tokenize(source);
     let mut tokens_iter = tokens.into_iter().peekable();
     let mut vm = Vm::new();
-    let mut compiler_state = CompilerState::new();
+    // let mut compiler_state = CompilerState::new();
     let mut last_result = Value::void();
 
     while tokens_iter.peek().is_some() {
@@ -82,14 +99,7 @@ pub fn run_source(
         if optimized_ast != LispExp::Void {
             let mut chunk = Chunk::new();
 
-            compile(
-                &optimized_ast,
-                &mut chunk,
-                false,
-                heap,
-                &mut compiler_state,
-                1,
-            )?;
+            compile(&optimized_ast, &mut chunk, false, heap, compiler_state, 1)?;
             // chunk.code.push(OpCode::Return);
             chunk.write(OpCode::Return, 1);
 
