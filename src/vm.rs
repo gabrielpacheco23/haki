@@ -273,13 +273,10 @@ impl Vm {
                 OpCode::GetLocal(idx) => {
                     let val = self.stack[frame.stack_offset + idx];
                     self.stack.push(val);
-                    // unsafe {
-                    //     let val = self.stack.get_unchecked(frame.stack_offset + idx);
-                    //     self.stack.push(*val);
-                    // }
                 }
                 OpCode::SetLocal(idx) => {
-                    let val = self.stack[frame.stack_offset + idx];
+                    // let val = self.stack.pop().unwrap_or(Value::void());
+                    let val = *self.stack.last().unwrap();
                     self.stack[frame.stack_offset + idx] = val;
                 }
                 OpCode::GetUpvalue(idx) => {

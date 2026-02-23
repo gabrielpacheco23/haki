@@ -183,7 +183,8 @@ impl CompilerJIT {
                     // local 0 = 8 bytes, local 1 = 16 bytes...
                     let offset = (*idx as i32 * 8) + 8;
                     dynasm!(self.ops
-                        ; pop rax                  // tira do topo da stack
+                        // ; pop rax                  // tira do topo da stack
+                        ; mov rax, [rsp]
                         ; mov [rbp - offset], rax  // salva no slot da memoria local
                     );
                 }
@@ -608,6 +609,7 @@ impl CompilerJIT {
                         ; push rax
                     );
                 }
+
                 OpCode::Return => {
                     dynasm!(self.ops
                         ; pop rax

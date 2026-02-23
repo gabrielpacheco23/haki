@@ -1,0 +1,52 @@
+;; ==========================================
+;; FRACTAL DE MANDELBROT - HAKI LISP JIT TEST
+;; ==========================================
+
+(define max-iter 100)
+
+;; O Coração do JIT: Matemática Pura sem 'let'.
+;; O compilador agora vai gerar apenas Add, Mul, Sub e TailCall!
+(define (mandelbrot-iter x y cx cy iter)
+  (if (>= iter max-iter)
+      iter
+      (if (> (+ (* x x) (* y y)) 4.0)
+          iter
+          (mandelbrot-iter (+ (- (* x x) (* y y)) cx)
+                           (+ (* 2.0 (* x y)) cy)
+                           cx 
+                           cy 
+                           (+ iter 1)))))
+
+;; Converte as iterações numa paleta de cores ASCII
+(define (get-char iter)
+  (cond ((= iter max-iter) "#")
+        ((> iter 50) "*")
+        ((> iter 20) ".")
+        ((> iter 10) "-")
+        (else " ")))
+
+;; Desenha as colunas de uma linha
+(define (loop-x x x-max step-x y)
+  (if (>= x x-max)
+      void
+      (begin
+        ;; Calcula o ponto e imprime o pixel imediatamente (I/O Nativo)
+        (display (get-char (mandelbrot-iter 0.0 0.0 x y 0)))
+        (loop-x (+ x step-x) x-max step-x y))))
+
+;; Desenha todas as linhas
+(define (loop-y y y-max step-y step-x)
+  (if (>= y y-max)
+      (displayln " Fim do desenho!")
+      (begin
+        (loop-x -2.0 1.0 step-x y)
+        (displayln "") ;; Pula para a próxima linha
+        (loop-y (+ y step-y) y-max step-y step-x))))
+
+
+(displayln "Iniciando renderização do Mandelbrot...")
+(displayln "Aquecendo o JIT Compiler...")
+(displayln "=======================================================")
+
+;; Dispara o teste de tempo!
+(time (loop-y -1.2 1.2 0.06 0.03))

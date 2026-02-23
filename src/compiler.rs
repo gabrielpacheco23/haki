@@ -617,7 +617,6 @@ pub fn compile(
                     compile(&call_ast, chunk, is_tail, heap, state, current_line)?;
                     return Ok(());
                 }
-
                 _ => {
                     compile(head, chunk, false, heap, state, current_line)?;
 
