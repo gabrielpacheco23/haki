@@ -209,3 +209,18 @@
 ;; ==========================================
 (defmacro (spawn func)
   `(spawn-native (quote ,func)))
+
+;; ==========================================
+;; LOOP FOR-IN (Iteração sobre Listas)
+;; Uso: (for-in item '(10 20 30) (displayln item))
+;; ==========================================
+(defmacro (for-in var lst &rest body)
+  `(let ((__lst ,lst))
+     (define (__loop l)
+       (if (null? l)
+           void
+           (let ((,var (car l)))
+             (begin
+               ,(cons 'begin body)
+               (__loop (cdr l))))))
+     (__loop __lst)))
