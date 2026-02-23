@@ -1,0 +1,73 @@
+;; ==========================================
+;; SUÍTE DE TESTES CORE - HAKI LISP
+;; ==========================================
+
+(define passed-tests 0)
+(define total-tests 0)
+
+(defmacro (assert condição nome)
+  `(begin
+     (set! total-tests (+ total-tests 1))
+     (if ,condição
+         (begin
+           (display "[PASS] ")
+           (displayln ,nome)
+           (set! passed-tests (+ passed-tests 1)))
+         (begin
+           (display "[FAIL] ")
+           (displayln ,nome)))))
+
+(displayln "Iniciando bateria de testes do Haki Lisp...")
+(displayln "==========================================")
+
+;; 1. Testes de Matemática e JIT (FPU)
+(assert (= (+ 10 20) 30) "Matematica: Soma basica")
+(assert (= (- 50 15) 35) "Matematica: Subtracao basica")
+(assert (= (* 6 7) 42) "Matematica: Multiplicacao")
+(assert (= (/ 100 4) 25) "Matematica: Divisao")
+(assert (= (sqrt 144.0) 12.0) "JIT/Hardware: Raiz Quadrada (sqrt)")
+
+;; 2. Tipos de Dados e Estruturas
+(assert (string=? "haki" "haki") "Strings: Igualdade (string=?)")
+(assert (= (car '(99 88 77)) 99) "Listas: Acesso nativo (car)")
+(assert (= (car (cdr '(99 88 77))) 88) "Listas: Navegacao profunda (cdr)")
+
+;; 3. Closures e Upvalues (O teste de stress do Garbage Collector)
+(define (make-adder x)
+  (lambda (y) (+ x y)))
+(define soma-10 (make-adder 10))
+(assert (= (soma-10 15) 25) "Closures: Captura de Upvalues")
+
+(define (make-counter)
+  (let ((count 0))
+    (lambda ()
+      (set! count (+ count 1))
+      count)))
+(define c (make-counter))
+(c) (c)
+(assert (= (c) 3) "Ambiente: Mutacao de estado com (set!)")
+
+;; 4. Otimizacao e Compilacao Dinamica
+(assert (= (eval '(+ 5 5)) 10) "Metaprogramacao: (eval) em tempo real")
+(assert (= (apply + '(20 30)) 50) "Metaprogramacao: (apply) com operador no Env")
+
+(inline (meu-dobro x) (* x 2))
+(assert (= (meu-dobro 25) 50) "Compilador: Expansao AST (inline)")
+
+;; 5. Tail Call Optimization (Prevenir Stack Overflow)
+(define (loop-infinito n)
+  (if (= n 0)
+      "sobreviveu"
+      (loop-infinito (- n 1))))
+(assert (string=? (loop-infinito 50000) "sobreviveu") "Memoria: Tail Call Optimization (TCO) sem vazar pilha")
+
+;; ==========================================
+(displayln "==========================================")
+(display "Testes finalizados: ")
+(display passed-tests)
+(display " / ")
+(displayln total-tests)
+
+(if (= passed-tests total-tests)
+    (displayln "STATUS: PRONTO PARA O MERGE NA MAIN! 🚀")
+    (displayln "STATUS: HÁ BUGS PARA RESOLVER ANTES DO MERGE! ❌"))
