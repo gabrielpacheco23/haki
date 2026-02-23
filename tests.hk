@@ -47,7 +47,10 @@
 (test "cdr de uma lista" '(2 3) (cdr '(1 2 3)))
 (test "length da lista" 4 (length '(a b c d)))
 (test "map com lambda" '(2 4 6) (map (lambda (x) (* x 2)) '(1 2 3)))
+ ; JIT FALHA NO modulo
 (test "filter" '(2 4) (filter (lambda (x) (= (modulo x 2) 0)) '(1 2 3 4 5)))
+
+ ; JIT FALHA NO fold
 (test "fold (soma de lista)" 15 (fold + 0 '(1 2 3 4 5)))
 
 (define (cria-multiplicador fator)

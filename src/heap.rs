@@ -9,6 +9,11 @@ pub struct Heap {
     pub free_list: Vec<usize>,
     pub marked: Vec<bool>,
     pub string_pool: RustHashMap<String, Value>,
+
+    pub worklist: Vec<Value>,
+
+    pub threshold: usize,
+    pub needs_gc: bool,
 }
 
 impl Heap {
@@ -18,6 +23,9 @@ impl Heap {
             free_list: vec![],
             marked: vec![],
             string_pool: RustHashMap::new(),
+            worklist: Vec::with_capacity(1024), // Pré-aloca espaço para o GC
+            threshold: 100_000,
+            needs_gc: false,
         }
     }
 
@@ -32,6 +40,11 @@ impl Heap {
     }
 
     pub fn alloc(&mut self, exp: LispExp) -> Value {
+        // (Nota: Lembre-se de reativar a chamada automática do GC aqui depois!)
+        if self.memory.len() > self.threshold {
+            self.needs_gc = true;
+        }
+
         if let Some(index) = self.free_list.pop() {
             self.memory[index] = exp;
             self.marked[index] = false;
@@ -66,50 +79,71 @@ impl Heap {
         }
     }
 
+    // ==========================================
+    // NOVO MOTOR DO GARBAGE COLLECTOR
+    // ==========================================
+
     pub fn mark_val(&mut self, val: Value) {
         if val.is_gc_ref() {
-            self.mark(val.as_gc_ref());
+            let index = val.as_gc_ref();
+            if index < self.memory.len() {
+                self.worklist.push(val);
+            }
         }
     }
 
-    pub fn mark(&mut self, index: usize) {
-        if self.marked[index] {
-            return;
-        }
-
-        self.marked[index] = true;
-
-        let exp = self.memory[index].clone();
-
-        match exp {
-            LispExp::Pair(car, cdr) => {
-                self.mark_val(car);
-                self.mark_val(cdr);
+    /// Esvazia o "Carrinho de Mão" processando todos os objetos pendentes
+    pub fn process_worklist(&mut self) {
+        while let Some(val) = self.worklist.pop() {
+            if !val.is_gc_ref() {
+                continue;
             }
-            LispExp::Vector(vec) => {
-                for v in vec {
-                    self.mark_val(v);
+            let index = val.as_gc_ref();
+
+            // Se já foi marcado, pula (evita loops infinitos em referências circulares Lisp!)
+            if self.marked[index] {
+                continue;
+            }
+
+            self.marked[index] = true;
+
+            let exp = self.memory[index].clone();
+
+            match exp {
+                LispExp::Pair(car, cdr) => {
+                    // Empurra os filhos para a fila! Sem usar a Pilha do Processador!
+                    self.worklist.push(car);
+                    self.worklist.push(cdr);
                 }
-            }
-            LispExp::HashMap(map) => {
-                for v in map.values() {
-                    self.mark_val(*v);
-                }
-            }
-            LispExp::VmClosure {
-                params: _,
-                chunk,
-                upvalues,
-            } => {
-                for upvalue in upvalues {
-                    if let UpvalueState::Closed(val) = *upvalue.state.borrow() {
-                        self.mark_val(val);
+                LispExp::Vector(vec) => {
+                    for v in vec {
+                        self.worklist.push(v);
                     }
                 }
-
-                self.mark_chunk(&chunk);
+                LispExp::HashMap(map) => {
+                    for v in map.values() {
+                        self.worklist.push(*v);
+                    }
+                }
+                LispExp::VmClosure {
+                    params: _,
+                    chunk,
+                    upvalues,
+                } => {
+                    for upvalue in upvalues {
+                        if let UpvalueState::Closed(v) = *upvalue.state.borrow() {
+                            self.worklist.push(v);
+                        }
+                    }
+                    self.mark_chunk(&chunk);
+                }
+                LispExp::List(l, _) => {
+                    for item in l {
+                        self.mark_lisp_exp(&item);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -176,17 +210,21 @@ pub fn collect_garbage(
         let env_borrowed = env_ref.borrow();
 
         for (_name, value) in env_borrowed.data.iter() {
+            // Joga as globais no carrinho...
             heap.mark_val(*value);
         }
 
         curr_env = env_borrowed.outer.clone();
     }
 
+    // Joga a pilha da VM no carrinho...
     heap.mark_val(protected_value);
-
     for value in vm_stack {
         heap.mark_val(*value);
     }
+
+    // O GRANDE MOMENTO: Aciona o motor iterativo para marcar tudo com segurança!
+    heap.process_worklist();
 
     heap.sweep(debug_gc);
 }

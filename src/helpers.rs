@@ -8,6 +8,22 @@ use crate::{
 };
 
 #[macro_export]
+macro_rules! debug {
+    ($($e:expr),+) => {
+        {
+            #[cfg(debug_assertions)]
+            {
+                println!($($e),+)
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                ($($e),+)
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! arithmetic_op {
     ($env:ident, $heap:ident, $name:expr, $init:expr, $op:tt) => {
         add_native!($env, $heap, $name, |args, _env, _heap| {

@@ -1,0 +1,8 @@
+(define (fib-tco n a b)
+  (if (= n 0)
+      a
+      (fib-tco (- n 1) b (+ a b))))
+
+(displayln "Iniciando JIT na VM Real (10 Milhoes de loops!)...")
+(time (define res (fib-tco 10000000 0 1)))
+(displayln res)

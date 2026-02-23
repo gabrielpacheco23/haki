@@ -1,4 +1,7 @@
 use crate::compiler::CompilerUpvalue;
+use crate::debug;
+use crate::heap::collect_garbage;
+use crate::jit::{CompilerJIT, JitResult};
 use crate::upvalue::{Upvalue, UpvalueState};
 use crate::{
     evaluate::eval,
@@ -172,19 +175,6 @@ impl Vm {
         });
     }
 
-    // pub fn close_upvalues(&mut self, last_stack_idx: usize) {
-    //     self.open_upvalues.retain(|upvalue| {
-    //         let mut state = upvalue.state.borrow_mut();
-    //         if let UpvalueState::Open(idx) = *state {
-    //             if idx >= last_stack_idx {
-    //                 *state = UpvalueState::Closed(self.stack[idx]);
-    //                 return false;
-    //             }
-    //         }
-    //         true
-    //     });
-    // }
-
     pub fn execute(
         &mut self,
         chunk: Rc<Chunk>,
@@ -235,6 +225,17 @@ impl Vm {
         }
 
         loop {
+            if heap.needs_gc {
+                collect_garbage(heap, &env, Value::void(), &self.stack, false);
+                heap.needs_gc = false;
+
+                heap.threshold = (heap.memory.len() - heap.free_list.len()) * 2;
+
+                if heap.threshold < 100_000 {
+                    heap.threshold = 100_000;
+                }
+            }
+
             if self.frames.is_empty() {
                 return Ok(self.stack.pop().unwrap_or(Value::void()));
             }
@@ -265,6 +266,7 @@ impl Vm {
                     env.borrow_mut().insert(name.clone(), val);
                     self.stack.push(Value::void());
                 }
+                // TODO: MAYBE CONSIDER USING get_unchecked?
                 OpCode::GetLocal(idx) => {
                     let val = self.stack[frame.stack_offset + idx];
                     self.stack.push(val);
@@ -360,24 +362,6 @@ impl Vm {
                             }
                             self.stack.push(result);
                         }
-                        // LispExp::Native(f) => {
-                        //     // Funções nativas do Rust recebem os argumentos por fatia (slice)
-                        //     let args_slice = &self.stack[stack_offset..].to_vec();
-                        //     let mut temp_env = env.clone();
-                        //     let result = f(args_slice, &mut temp_env, heap)?;
-
-                        //     // Limpa os argumentos e a função nativa da pilha
-                        //     self.stack.truncate(stack_offset - 1);
-
-                        //     if is_tail {
-                        //         let frame = self.frames.pop().unwrap();
-                        //         self.close_upvalues(frame.stack_offset);
-                        //         if self.frames.is_empty() {
-                        //             return Ok(result);
-                        //         }
-                        //     }
-                        //     self.stack.push(result);
-                        // }
                         LispExp::VmClosure {
                             params,
                             chunk,
@@ -389,6 +373,37 @@ impl Vm {
                                     params.len(),
                                     arg_count
                                 ));
+                            }
+
+                            // interceptador JIT
+                            if crate::jit::can_jit(&chunk) {
+                                debug!("[DEBUG] Rodando no JIT...");
+                                let mut jit = CompilerJIT::new();
+                                let args_start = self.stack.len() - arg_count;
+                                let args_slice = &self.stack[args_start..].to_vec();
+
+                                jit.compile_with_args(&chunk, args_slice, &heap, &env, func_val);
+                                match jit.execute().unwrap() {
+                                    JitResult::Success(val) => {
+                                        if is_tail {
+                                            let frame = self.frames.pop().unwrap();
+                                            self.close_upvalues(frame.stack_offset);
+                                            if frame.stack_offset > 0 {
+                                                self.stack.truncate(frame.stack_offset - 1);
+                                            } else {
+                                                self.stack.clear();
+                                            }
+                                            if self.frames.is_empty() {
+                                                return Ok(val);
+                                            }
+                                        } else {
+                                            self.stack.truncate(args_start - 1);
+                                        }
+                                        self.stack.push(val);
+                                        continue;
+                                    }
+                                    JitResult::Bailout(_reason) => {}
+                                }
                             }
 
                             if is_tail {

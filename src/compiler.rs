@@ -107,7 +107,7 @@ pub fn compile(
     state: &mut CompilerState,
     previous_line: usize,
 ) -> Result<(), String> {
-    let aritmethic_operators = ["+", "-", "*", "/"];
+    let aritmethic_operators = ["+", "-", "*", "/", "modulo"];
     let comparison_operators = ["<", ">", "=", "<=", ">="];
 
     let current_line = match exp {
@@ -391,6 +391,7 @@ pub fn compile(
                             "-" => chunk.write(OpCode::Sub, current_line),
                             "*" => chunk.write(OpCode::Mul, current_line),
                             "/" => chunk.write(OpCode::Div, current_line),
+                            "modulo" => chunk.write(OpCode::Mod, current_line),
                             _ => {}
                         }
                     }

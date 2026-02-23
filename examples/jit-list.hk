@@ -1,0 +1,23 @@
+(displayln "=== TESTE DE TRAVESSIA JIT (C/Rust FFI) ===")
+
+;; 1. A VM constrói uma lista de 5 MILHÕES de nós de forma segura!
+;; (Coloquei 0 no final em vez de '() para facilitar nosso teste de soma)
+(define (build-list n acc)
+  (if (= n 0)
+      acc
+      (build-list (- n 1) (cons n acc))))
+
+(displayln "Construindo lista de 5 milhoes de elementos na VM...")
+(define lista-gigante (build-list 5000000 0))
+(displayln "Lista construída!")
+
+;; 2. O JIT assume o controle! 
+;; Essa função só tem TCO, Sub, Add, Car e Cdr. O JIT vai compilar ela!
+(define (sum-list lst i acc)
+  (if (= i 0)
+      acc
+      ;; Pega o CDR (resto) nativamente, diminui o I, e soma o CAR (atual) no acumulador
+      (sum-list (cdr lst) (- i 1) (+ acc (car lst)))))
+
+(displayln "Iniciando travessia e soma com JIT FFI...")
+(time (sum-list lista-gigante 5000000 0))

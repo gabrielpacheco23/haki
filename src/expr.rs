@@ -163,7 +163,7 @@ impl<'a> std::fmt::Display for LispFmt<'a> {
                     }
                 )
             } else {
-                write!(f, "<nil>")
+                write!(f, "<invalid-heap-ref>: {:?}", v)
             }
         } else {
             write!(f, "<invalid-tag>")
