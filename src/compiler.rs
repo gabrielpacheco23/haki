@@ -518,6 +518,15 @@ pub fn compile(
                     }
                 }
 
+                LispExp::Symbol(s, _) if s == "vector-ref" => {
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    compile(&list[2], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::VectorRef, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
                 LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap, state, current_line)?; // condition
 

@@ -1,6 +1,7 @@
 use crate::env::Env;
 use crate::expr::{LispExp, lisp_fmt};
 use crate::heap::Heap;
+use crate::helpers::ast_to_value;
 use crate::value::Value;
 use crate::vm::{Chunk, OpCode};
 use dynasmrt::{DynasmApi, DynasmLabelApi, dynasm};
@@ -8,6 +9,26 @@ use std::mem;
 
 extern "C" fn fmod_jit(a: f64, b: f64) -> f64 {
     a % b
+}
+
+extern "C" fn jit_vector_ref(vec_val: u64, idx_val: u64, heap_ptr: *mut Heap) -> u64 {
+    let vec: Value = unsafe { mem::transmute(vec_val) };
+    let idx: Value = unsafe { mem::transmute(idx_val) };
+    let mut heap = unsafe { &mut *heap_ptr };
+
+    if vec.is_gc_ref() && idx.is_number() {
+        let i = idx.as_number() as usize;
+        let v = if let Some(LispExp::Vector(l)) = heap.get(vec) {
+            l.clone()
+        } else {
+            vec![]
+        };
+        if i < v.len() {
+            return unsafe { mem::transmute(v[i]) };
+        }
+    }
+
+    0xBADBADBADBADBADB
 }
 
 extern "C" fn jit_display(val: u64, heap_ptr: *const Heap) -> u64 {
@@ -178,6 +199,7 @@ impl CompilerJIT {
         let string_eq_ptr = jit_string_eq as *const () as u64;
         let sin_ptr = jit_sin as *const () as u64;
         let cos_ptr = jit_cos as *const () as u64;
+        let vector_ref_ptr = jit_vector_ref as *const () as u64;
 
         for (ip, instruction) in chunk.code.iter().enumerate() {
             // ancoramos a label da instrução atual na memoria
@@ -495,8 +517,8 @@ impl CompilerJIT {
 
                             ; call =>recursive_entry
 
-                            // AQUI ESTÁ A MAGIA! PROPAGAÇÃO DE BAILOUT:
-                            // Se a recursão interna ejetou, repassa a ejeção pra VM!
+                            // PROPAGAÇÃO DE BAILOUT:
+                            // Se a recursão interna ejetou, repassa a ejeção pra VM
                             ; mov rcx, QWORD bailout_code as _
                             ; cmp rax, rcx
                             ; je =>bailout_label
@@ -664,6 +686,26 @@ impl CompilerJIT {
                     );
                 }
 
+                OpCode::VectorRef => {
+                    dynasm!(self.ops
+                        ; pop rsi                            // index
+                        ; pop rdi                            // vector ptr
+                        ; mov rdx, QWORD heap_addr as _      // heap ptr
+                        ; mov r15, QWORD vector_ref_ptr as _
+
+                        ; mov r14, rsp
+                        ; and rsp, -16
+                        ; call r15
+                        ; mov rsp, r14
+
+                        ; mov rcx, QWORD bailout_code as _
+                        ; cmp rax, rcx
+                        ; je =>bailout_label
+
+                        ; push rax
+                    );
+                }
+
                 OpCode::Return => {
                     dynasm!(self.ops
                         ; pop rax
@@ -742,6 +784,7 @@ pub fn can_jit(chunk: &Chunk) -> bool {
             | OpCode::Sqrt
             | OpCode::Sin
             | OpCode::Cos
+            | OpCode::VectorRef
             | OpCode::Pop => continue,
             _ => return false,
         }

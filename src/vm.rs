@@ -9,6 +9,7 @@ use crate::{
     helpers::{ast_to_value, pairs_to_vec},
     value::Value,
 };
+use std::cell::Cell;
 use std::{fmt::Display, rc::Rc};
 
 use crate::{
@@ -53,6 +54,7 @@ pub enum OpCode {
     Display,
     Newline,
     StringEq,
+    VectorRef,
     MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
 }
 
@@ -61,6 +63,7 @@ pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: Vec<Value>,
     pub lines: Vec<usize>,
+    pub failed_jit: Cell<bool>,
 }
 
 impl Chunk {
@@ -69,6 +72,7 @@ impl Chunk {
             code: vec![],
             constants: vec![],
             lines: vec![],
+            failed_jit: Cell::new(false),
         }
     }
 
@@ -379,7 +383,7 @@ impl Vm {
                             }
 
                             // interceptador JIT
-                            if crate::jit::can_jit(&chunk) {
+                            if !chunk.failed_jit.get() && crate::jit::can_jit(&chunk) {
                                 debug!("[DEBUG] Rodando no JIT...");
                                 let mut jit = CompilerJIT::new();
                                 let args_start = self.stack.len() - arg_count;
@@ -405,7 +409,9 @@ impl Vm {
                                         self.stack.push(val);
                                         continue;
                                     }
-                                    JitResult::Bailout(_reason) => {}
+                                    JitResult::Bailout(_reason) => {
+                                        chunk.failed_jit.set(true);
+                                    }
                                 }
                             }
 
@@ -635,6 +641,23 @@ impl Vm {
                     let val = self.stack.pop().unwrap_or(Value::number(0.0));
                     self.stack.push(Value::number(val.as_number().cos()));
                 }
+                OpCode::VectorRef => {
+                    let idx = self.stack.pop().unwrap_or(Value::number(0.0));
+                    let vec_val = self.stack.pop().unwrap_or(Value::void());
+
+                    let vec = if let Some(LispExp::Vector(v)) = heap.get(vec_val) {
+                        v.clone()
+                    } else {
+                        self.stack.push(Value::void());
+                        continue;
+                    };
+                    let i = idx.as_number() as usize;
+                    if i < vec.len() {
+                        self.stack.push(vec[i]);
+                    } else {
+                        self.stack.push(Value::void());
+                    }
+                }
             }
         }
     }
@@ -678,6 +701,7 @@ impl Display for OpCode {
             OpCode::Sqrt => write!(f, "SQRT"),
             OpCode::Sin => write!(f, "SIN "),
             OpCode::Cos => write!(f, "COS"),
+            OpCode::VectorRef => write!(f, "VECTOR_REF"),
         }
     }
 }
@@ -735,6 +759,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Sqrt => println!("{}", instruction),
             OpCode::Sin => println!("{}", instruction),
             OpCode::Cos => println!("{}", instruction),
+            OpCode::VectorRef => println!("{}", instruction),
         }
     }
     println!("======================\n");
