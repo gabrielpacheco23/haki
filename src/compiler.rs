@@ -560,6 +560,32 @@ pub fn compile(
                     }
                 }
 
+                LispExp::Symbol(s, _) if s == "apply" => {
+                    if list.len() != 3 {
+                        return Err("'apply' expects 2 arguments (procedure and list)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // Empurra a Função
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // Empurra a Lista
+                    chunk.write(OpCode::Apply, current_line);
+
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
+                LispExp::Symbol(s, _) if s == "eval" => {
+                    if list.len() != 2 {
+                        return Err("'eval' expects 1 argument".to_string());
+                    }
+
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::Eval, current_line);
+
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
                 LispExp::Symbol(s, _) if s == "if" => {
                     compile(&list[1], chunk, false, heap, state, current_line)?; // condition
 

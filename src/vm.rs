@@ -1,4 +1,4 @@
-use crate::compiler::CompilerUpvalue;
+use crate::compiler::{CompilerState, CompilerUpvalue, compile};
 use crate::debug;
 use crate::expr::{is_deep_equal, lisp_fmt};
 use crate::heap::collect_garbage;
@@ -56,6 +56,8 @@ pub enum OpCode {
     StringEq,
     VectorRef,
     MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
+    Eval,
+    Apply,
 }
 
 #[derive(Clone, Debug)]
@@ -658,6 +660,93 @@ impl Vm {
                         self.stack.push(Value::void());
                     }
                 }
+                OpCode::Apply => {
+                    // 1. Tira a lista do topo da pilha
+                    let lst_val = self.stack.pop().unwrap_or(Value::void());
+
+                    let mut arg_count = 0;
+
+                    // 2. Achata a Lista Ligada (Pair) ou Vetor (List) para dentro da Pilha
+                    if lst_val.is_gc_ref() {
+                        let exp = heap.get(lst_val).unwrap().clone();
+                        let items = if let LispExp::Pair(_, _) = exp {
+                            if let LispExp::List(v, _) = pairs_to_vec(&exp, heap) {
+                                v
+                            } else {
+                                vec![]
+                            }
+                        } else if let LispExp::List(v, _) = exp {
+                            v
+                        } else {
+                            vec![]
+                        };
+
+                        for item in items {
+                            self.stack.push(ast_to_value(&item, heap));
+                            arg_count += 1;
+                        }
+                    } else if !lst_val.is_void() {
+                        return Err("'apply' requires a valid list of arguments".to_string());
+                    }
+
+                    // 3. O FRAME FANTASMA: Criamos um mini-programa on-the-fly
+                    // Ele só tem uma instrução: TailCall. Quando a VM executar isto,
+                    // ela fará a chamada perfeitamente e substituirá este frame falso pelo verdadeiro
+                    let mut apply_chunk = Chunk::new();
+                    apply_chunk.write(OpCode::TailCall(arg_count), 0);
+
+                    self.frames.push(CallFrame {
+                        chunk: std::rc::Rc::new(apply_chunk),
+                        ip: 0,
+                        stack_offset: self.stack.len() - arg_count,
+                        closure_upvalues: vec![],
+                    });
+                }
+                OpCode::Eval => {
+                    let val = self.stack.pop().unwrap_or(Value::void());
+
+                    let mut ast = if let Some(exp) = heap.get(val) {
+                        exp.clone() // Listas, Símbolos, Strings, Pairs
+                    } else if val.is_number() {
+                        LispExp::Number(val.as_number())
+                    } else if val.is_boolean() {
+                        LispExp::Bool(val.as_boolean())
+                    } else {
+                        LispExp::Void
+                    };
+
+                    // Achata a corrente de Pairs para um LispExp::List
+                    if let LispExp::Pair(_, _) = ast {
+                        ast = pairs_to_vec(&ast, heap);
+                    }
+
+                    let mut compiler_state = CompilerState::new();
+                    let mut new_chunk = Chunk::new();
+
+                    if let Err(e) = crate::compiler::compile(
+                        &ast,
+                        &mut new_chunk,
+                        false,
+                        heap,
+                        &mut compiler_state,
+                        0,
+                    ) {
+                        return Err(format!("Eval Compile Error: {}", e));
+                    }
+                    new_chunk.write(OpCode::Return, 0);
+
+                    // O ESCUDO DA PILHA: Empurramos um Void fantasma
+                    // O 'OpCode::Return' apagará este Void em vez de corromper a pilha da função chamadora
+                    self.stack.push(Value::void());
+
+                    // Inicia a execução do código compilado em tempo real
+                    self.frames.push(CallFrame {
+                        chunk: std::rc::Rc::new(new_chunk),
+                        ip: 0,
+                        stack_offset: self.stack.len(), // Seguro graças ao fantasma!
+                        closure_upvalues: vec![],
+                    });
+                }
             }
         }
     }
@@ -702,6 +791,8 @@ impl Display for OpCode {
             OpCode::Sin => write!(f, "SIN "),
             OpCode::Cos => write!(f, "COS"),
             OpCode::VectorRef => write!(f, "VECTOR_REF"),
+            OpCode::Eval => write!(f, "EVAL"),
+            OpCode::Apply => write!(f, "APPLY"),
         }
     }
 }
@@ -760,6 +851,8 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::Sin => println!("{}", instruction),
             OpCode::Cos => println!("{}", instruction),
             OpCode::VectorRef => println!("{}", instruction),
+            OpCode::Eval => println!("{}", instruction),
+            OpCode::Apply => println!("{}", instruction),
         }
     }
     println!("======================\n");
