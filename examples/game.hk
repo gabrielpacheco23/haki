@@ -1,0 +1,48 @@
+;; ==========================================
+;; HAKI LISP GAME ENGINE (RAYLIB)
+;; ==========================================
+(require "../libraries/raylib.hk")
+
+(define cor-fundo (rgba 30 30 40 255))
+(define cor-vermelha (rgba 230 41 55 255))
+
+;; Constantes do Teclado no Raylib
+(define KEY-RIGHT 262)
+(define KEY-LEFT 263)
+
+(define (limit valor minimo maximo)
+  (if (< valor minimo) minimo
+    (if (> valor maximo) maximo valor)))
+
+;; ==========================================
+;; O LOOP COM CONTROLO DE TECLADO
+;; ==========================================
+;; ==========================================
+;; O LOOP FUNCIONAL (Sem bugs de pilha!)
+;; ==========================================
+(define (game-loop x-pos)
+  (if (window-should-close)
+      (close-window)
+      (let* ((dir-direita (if (= (is-key-down KEY-RIGHT) 1) 5 0))
+             (dir-esquerda (if (= (is-key-down KEY-LEFT) 1) -5 0))
+             ;; Calcula o movimento
+             (x-cru (+ x-pos (+ dir-direita dir-esquerda)))
+             
+             ;; PRENDE NA TELA: A tela tem 800px, o quadrado tem 100px.
+             ;; Logo, o X máximo é 700!
+             (novo-x (limit x-cru 0 700)))
+        (begin
+          (begin-drawing)
+          (clear-background cor-fundo)
+          (draw-rectangle novo-x 250 100 100 cor-vermelha)
+          (end-drawing)
+
+          ;; Próximo frame
+          (game-loop novo-x)))))
+
+;; Start game
+(set-target-fps 60)
+
+(displayln "Iniciando Haki Engine (Setas para mover!)...")
+(init-window 800 600 "Haki Lisp: Motor Interativo")
+(game-loop 350)
