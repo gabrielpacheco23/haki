@@ -385,37 +385,116 @@ impl Vm {
                             }
 
                             // interceptador JIT
-                            if !chunk.failed_jit.get() && crate::jit::can_jit(&chunk) {
-                                debug!("[DEBUG] Rodando no JIT...");
-                                let mut jit = CompilerJIT::new();
-                                let args_start = self.stack.len() - arg_count;
-                                let args_slice = &self.stack[args_start..].to_vec();
+                            // if !chunk.failed_jit.get() {
+                            //     if crate::jit::can_jit(&chunk) {
+                            //         debug!("[DEBUG] Rodando no JIT...");
+                            //         let mut jit = CompilerJIT::new();
+                            //         let args_start = self.stack.len() - arg_count;
+                            //         let args_slice = &self.stack[args_start..].to_vec();
 
-                                jit.compile_with_args(&chunk, args_slice, &heap, &env, func_val);
-                                match jit.execute().unwrap() {
-                                    JitResult::Success(val) => {
-                                        if is_tail {
-                                            let frame = self.frames.pop().unwrap();
-                                            self.close_upvalues(frame.stack_offset);
-                                            if frame.stack_offset > 0 {
-                                                self.stack.truncate(frame.stack_offset - 1);
+                            //         jit.compile_with_args(
+                            //             &chunk, args_slice, &heap, &env, func_val,
+                            //         );
+
+                            // interceptador JIT
+                            if !chunk.failed_jit.get() {
+                                if crate::jit::can_jit(&chunk) {
+                                    debug!("[DEBUG] Rodando no JIT...");
+                                    let mut jit = CompilerJIT::new();
+                                    let args_start = self.stack.len() - arg_count;
+                                    let args_slice = &self.stack[args_start..].to_vec();
+
+                                    jit.compile_with_args(
+                                        &chunk, args_slice, &heap, &env, func_val,
+                                    );
+                                    match jit.execute().unwrap() {
+                                        JitResult::Success(val) => {
+                                            if is_tail {
+                                                let frame = self.frames.pop().unwrap();
+                                                self.close_upvalues(frame.stack_offset);
+                                                if frame.stack_offset > 0 {
+                                                    self.stack.truncate(frame.stack_offset - 1);
+                                                } else {
+                                                    self.stack.clear();
+                                                }
+                                                if self.frames.is_empty() {
+                                                    return Ok(val);
+                                                }
                                             } else {
-                                                self.stack.clear();
+                                                self.stack.truncate(args_start - 1);
                                             }
-                                            if self.frames.is_empty() {
-                                                return Ok(val);
-                                            }
-                                        } else {
-                                            self.stack.truncate(args_start - 1);
+                                            self.stack.push(val);
+                                            continue;
                                         }
-                                        self.stack.push(val);
-                                        continue;
+                                        JitResult::Bailout(_reason) => {
+                                            chunk.failed_jit.set(true);
+                                        }
                                     }
-                                    JitResult::Bailout(_reason) => {
-                                        chunk.failed_jit.set(true);
-                                    }
+                                } else {
+                                    // A MÁGICA AQUI: O can_jit rejeitou? Lista negra nele imediatamente!
+                                    chunk.failed_jit.set(true);
                                 }
                             }
+                            //     match jit.execute().unwrap() {
+                            //         JitResult::Success(val) => {
+                            //             if is_tail {
+                            //                 let frame = self.frames.pop().unwrap();
+                            //                 self.close_upvalues(frame.stack_offset);
+                            //                 if frame.stack_offset > 0 {
+                            //                     self.stack.truncate(frame.stack_offset - 1);
+                            //                 } else {
+                            //                     self.stack.clear();
+                            //                 }
+                            //                 if self.frames.is_empty() {
+                            //                     return Ok(val);
+                            //                 }
+                            //             } else {
+                            //                 self.stack.truncate(args_start - 1);
+                            //             }
+                            //             self.stack.push(val);
+                            //             continue;
+                            //         }
+                            //         JitResult::Bailout(_reason) => {
+                            //             chunk.failed_jit.set(true);
+                            //         }
+                            //     }
+                            // } else {
+                            //     chunk.failed_jit.set(true);
+                            // }
+                            // }
+
+                            // interceptador JIT
+                            // if !chunk.failed_jit.get() && crate::jit::can_jit(&chunk) {
+                            //     debug!("[DEBUG] Rodando no JIT...");
+                            //     let mut jit = CompilerJIT::new();
+                            //     let args_start = self.stack.len() - arg_count;
+                            //     let args_slice = &self.stack[args_start..].to_vec();
+
+                            //     jit.compile_with_args(&chunk, args_slice, &heap, &env, func_val);
+                            //     match jit.execute().unwrap() {
+                            //         JitResult::Success(val) => {
+                            //             if is_tail {
+                            //                 let frame = self.frames.pop().unwrap();
+                            //                 self.close_upvalues(frame.stack_offset);
+                            //                 if frame.stack_offset > 0 {
+                            //                     self.stack.truncate(frame.stack_offset - 1);
+                            //                 } else {
+                            //                     self.stack.clear();
+                            //                 }
+                            //                 if self.frames.is_empty() {
+                            //                     return Ok(val);
+                            //                 }
+                            //             } else {
+                            //                 self.stack.truncate(args_start - 1);
+                            //             }
+                            //             self.stack.push(val);
+                            //             continue;
+                            //         }
+                            //         JitResult::Bailout(_reason) => {
+                            //             chunk.failed_jit.set(true);
+                            //         }
+                            //     }
+                            // }
 
                             if is_tail {
                                 let old_frame = self.frames.pop().unwrap();

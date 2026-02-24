@@ -40,8 +40,8 @@ impl Heap {
     }
 
     pub fn alloc(&mut self, exp: LispExp) -> Value {
-        // (Nota: Lembre-se de reativar a chamada automática do GC aqui depois!)
-        if self.memory.len() > self.threshold {
+        // (NOTA: Lembre-se de reativar a chamada automática do GC aqui depois)
+        if (self.memory.len() - self.free_list.len()) > self.threshold {
             self.needs_gc = true;
         }
 

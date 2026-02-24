@@ -4,8 +4,6 @@
 
 (define max-iter 100)
 
-;; O Coração do JIT: Matemática Pura sem 'let'.
-;; O compilador agora vai gerar apenas Add, Mul, Sub e TailCall!
 (define (mandelbrot-iter x y cx cy iter)
   (if (>= iter max-iter)
       iter

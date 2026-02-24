@@ -4,7 +4,7 @@
   (let ((count 0))
     (lambda ()
       (set! count (+ count 1))
-  count)))
+    count)))
 
 (define meu-contador (make-counter))
   (time (dotimes (i 1000000)
@@ -22,7 +22,7 @@
     (lambda (c)
       (lambda (d)
         ;; Acessa variáveis de 4 níveis de escopo diferentes!
-(+ a b c d)))))
+        (+ a b c d)))))
 
 (define add-10 (make-adder 10))
 (define add-10-20 (add-10 20))
@@ -39,8 +39,8 @@
   (if (= n 0)
     acc
 (sum-loop (- n 1) (+ acc n))))
+
 (time
   (begin
     (display "Resultado da soma: ")
-
-(displayln (sum-loop 5000000 0))))
+    (displayln (sum-loop 5000000 0))))
