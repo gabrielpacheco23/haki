@@ -1,0 +1,44 @@
+;; ==========================================
+;; HAKI LISP GAME ENGINE - STRUCTS PURAS
+;; ==========================================
+(require "libraries/raylib.hk")
+
+;; Criamos as cores usando a nova Struct 'Color'!
+(define cor-fundo (Color 30 30 40 255))
+(define cor-vermelha (Color 230 41 55 255))
+
+(define (limit valor minimo maximo)
+  (if (< valor minimo) minimo
+    (if (> valor maximo) maximo valor)))
+
+;; A nossa Struct do Jogador
+(struct Jogador (x y w h cor velocidade))
+
+(define (game-loop jogador)
+  (if (window-should-close)
+      (close-window)
+      (let* ((dir-direita (if (= (is-key-down KEY-RIGHT) 1) jogador:velocidade 0))
+             (dir-esquerda (if (= (is-key-down KEY-LEFT) 1) (- 0 jogador:velocidade) 0))
+             
+             (x-cru (+ jogador:x (+ dir-direita dir-esquerda)))
+             (novo-x (limit x-cru 0 (- (get-screen-width) jogador:w)))
+             
+             (novo-jogador (Jogador novo-x jogador:y jogador:w jogador:h jogador:cor jogador:velocidade)))
+        (begin
+          (begin-drawing)
+          
+          ;; Passamos o objeto 'Color' inteiro e o wrapper trata do FFI
+          (clear-background cor-fundo)
+          (draw-rectangle novo-jogador:x novo-jogador:y novo-jogador:w novo-jogador:h novo-jogador:cor)
+          
+          (end-drawing)
+          (game-loop novo-jogador)))))
+
+(set-target-fps 60)
+(displayln "Iniciando Haki Engine...")
+(init-window 800 600 "Haki with Raylib!")
+
+;; Instanciamos o jogador passando a 'cor-vermelha' (que agora é um objeto Color)
+(define heroi (Jogador 350 250 100 100 cor-vermelha 5))
+
+(game-loop heroi)

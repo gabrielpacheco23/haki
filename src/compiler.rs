@@ -126,6 +126,22 @@ pub fn compile(
 
     match exp {
         LispExp::Symbol(s, _) => {
+            if let Some((var_name, field_name)) = s.split_once(':') {
+                compile(
+                    &LispExp::Symbol(var_name.to_string(), current_line),
+                    chunk,
+                    false,
+                    heap,
+                    state,
+                    current_line,
+                )?;
+                chunk.write(OpCode::StructGetField(field_name.to_string()), current_line);
+                if is_tail {
+                    chunk.write(OpCode::Return, current_line);
+                }
+                return Ok(());
+            }
+
             let ctx_idx = state.contexts.len() - 1;
 
             if let Some(local_idx) = state.contexts[ctx_idx].resolve_local(s) {
@@ -192,6 +208,27 @@ pub fn compile(
                 }
                 return Ok(());
             }
+
+            if list.len() == 1 {
+                if let LispExp::Symbol(s, _) = &list[0] {
+                    if let Some((var_name, field_name)) = s.split_once(':') {
+                        compile(
+                            &LispExp::Symbol(var_name.to_string(), current_line),
+                            chunk,
+                            false,
+                            heap,
+                            state,
+                            current_line,
+                        )?;
+                        chunk.write(OpCode::StructGetField(field_name.to_string()), current_line);
+                        if is_tail {
+                            chunk.write(OpCode::Return, current_line);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
             let head = &list[0];
             match head {
                 LispExp::Symbol(s, _) if s == "quote" => {
@@ -205,6 +242,55 @@ pub fn compile(
                     if is_tail {
                         chunk.write(OpCode::Return, current_line);
                     }
+                }
+                LispExp::Symbol(s, _) if s == "struct" => {
+                    if list.len() != 3 {
+                        return Err("Usage: (struct name (field1 field2))".to_string());
+                    }
+
+                    let struct_name = if let LispExp::Symbol(n, _) = &list[1] {
+                        n.clone()
+                    } else {
+                        return Err("Invalid struct name".to_string());
+                    };
+
+                    let field_names = if let LispExp::List(f, _) = &list[2] {
+                        f.iter()
+                            .map(|item| {
+                                if let LispExp::Symbol(fname, _) = item {
+                                    Ok(fname.clone())
+                                } else {
+                                    Err("Invalid field name".to_string())
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                    } else {
+                        return Err("The struct fields should be a list".to_string());
+                    };
+
+                    // Criamos a função construtora invisível
+                    let mut closure_chunk = Chunk::new();
+                    // Coloca as variáveis locais (argumentos) na pilha
+                    for i in 0..field_names.len() {
+                        closure_chunk.write(OpCode::GetLocal(i), current_line);
+                    }
+                    closure_chunk.write(
+                        OpCode::MakeStruct(struct_name.clone(), field_names.clone()),
+                        current_line,
+                    );
+                    closure_chunk.write(OpCode::Return, current_line);
+
+                    // Grava a função na memória e cria uma variável Global com o nome da Struct
+                    chunk.write(
+                        OpCode::MakeClosure(field_names, std::rc::Rc::new(closure_chunk), vec![]),
+                        current_line,
+                    );
+                    chunk.write(OpCode::DefGlobal(struct_name), current_line);
+
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                    return Ok(());
                 }
                 LispExp::Symbol(s, _) if s == "set!" => {
                     if list.len() != 3 {

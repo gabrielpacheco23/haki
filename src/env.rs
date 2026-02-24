@@ -1573,6 +1573,91 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
             }
         });
+
+        add_native!(env, heap, "struct->c", |args, e, h| {
+            if args.len() != 2 {
+                return Err("struct->c expects a struct and a list of types".to_string());
+            }
+
+            let struct_val = args[0];
+
+            // Pegamos os VALORES da LispExp::Struct
+            let campos = if let Some(LispExp::Struct(_, _, vals)) = h.get(struct_val) {
+                vals.clone()
+            } else {
+                return Err("The first argument should be a struct".to_string());
+            };
+
+            // Extraímos a "Assinatura de Memória" (ex: '("float" "float" "int"))
+            let mut type_strs = vec![];
+            if let Some(exp) = h.get(args[1]) {
+                let t_list = if let LispExp::Pair(_, _) = exp {
+                    crate::helpers::pairs_to_vec(exp, h)
+                } else {
+                    exp.clone()
+                };
+                if let LispExp::List(items, _) = t_list {
+                    for item in items {
+                        if let LispExp::Str(s) = item {
+                            type_strs.push(s);
+                        }
+                    }
+                }
+            }
+
+            // Calculamos o tamanho total necessário na memória (em bytes)
+            let mut offset = 0;
+            for t in &type_strs {
+                match t.as_str() {
+                    "int" | "uint" | "float" => offset += 4,
+                    "double" | "pointer" => offset += 8,
+                    "byte" => offset += 1,
+                    _ => offset += 4, // Alinhamento padrão simplificado
+                }
+            }
+
+            // Alocamos a memória física real!
+            let raw_ptr = unsafe {
+                std::alloc::alloc(std::alloc::Layout::from_size_align(offset, 4).unwrap())
+            };
+
+            // Escrevemos os campos nativos do Haki diretamente nos bytes do C
+            let mut current_offset = 0;
+            for (i, t) in type_strs.iter().enumerate() {
+                let physical_addr = raw_ptr as usize + current_offset;
+                let val = campos[i];
+
+                unsafe {
+                    match t.as_str() {
+                        "int" => {
+                            *(physical_addr as *mut i32) = val.as_number() as i32;
+                            current_offset += 4;
+                        }
+                        "uint" => {
+                            *(physical_addr as *mut u32) = val.as_number() as u32;
+                            current_offset += 4;
+                        }
+                        "float" => {
+                            *(physical_addr as *mut f32) = val.as_number() as f32;
+                            current_offset += 4;
+                        }
+                        "byte" => {
+                            *(physical_addr as *mut u8) = val.as_number() as u8;
+                            current_offset += 1;
+                        }
+                        "pointer" => {
+                            *(physical_addr as *mut u8) = val.as_number() as u8;
+                            current_offset += 8;
+                        }
+                        // Adicione ponteiros se necessário
+                        _ => {}
+                    }
+                }
+            }
+
+            // Devolvemos o raw pointer
+            Ok(h.alloc(LispExp::RawPtr(raw_ptr as usize)))
+        });
     }
 
     lisp_env

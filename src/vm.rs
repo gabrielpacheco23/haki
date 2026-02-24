@@ -69,6 +69,8 @@ pub enum OpCode {
     PeekValue,
     PeekInt,
     PokeInt,
+    MakeStruct(String, Vec<String>),
+    StructGetField(String),
 }
 
 #[derive(Clone, Debug)]
@@ -918,7 +920,6 @@ impl Vm {
                         return Err("'peek-int' exige um RawPtr".to_string());
                     }
                 }
-
                 OpCode::PeekValue => {
                     let offset =
                         self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
@@ -985,7 +986,6 @@ impl Vm {
                         return Err("'poke-int' requires a raw pointer".to_string());
                     }
                 }
-
                 OpCode::PokeValue => {
                     let val = self.stack.pop().unwrap_or(Value::void());
                     let offset =
@@ -1003,6 +1003,34 @@ impl Vm {
                         self.stack.push(Value::void());
                     } else {
                         return Err("'poke-value' expecccts a raw pointer".to_string());
+                    }
+                }
+                OpCode::MakeStruct(name, fields_names) => {
+                    let mut fields = Vec::with_capacity(fields_names.len());
+                    // Puxa os valores na ordem correta
+                    for _ in 0..fields_names.len() {
+                        fields.push(self.stack.pop().unwrap_or(Value::void()));
+                    }
+                    fields.reverse();
+
+                    let struct_ptr =
+                        heap.alloc(LispExp::Struct(name.clone(), fields_names.clone(), fields));
+                    self.stack.push(struct_ptr);
+                }
+                OpCode::StructGetField(field_name) => {
+                    let obj = self.stack.pop().unwrap_or(Value::void());
+                    if let Some(LispExp::Struct(_, names, values)) = heap.get(obj) {
+                        // Procura a posição do campo pela String
+                        if let Some(idx) = names.iter().position(|n| n == field_name) {
+                            self.stack.push(values[idx]);
+                        } else {
+                            return Err(format!("Field '{}' not found in struct", field_name));
+                        }
+                    } else {
+                        return Err(
+                            "Attempting to access a field in an object that is not a struct"
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -1062,6 +1090,8 @@ impl Display for OpCode {
             OpCode::PeekInt => write!(f, "PEEK_INT"),
             OpCode::PeekValue => write!(f, "PEEK_VALUE"),
             OpCode::PokeInt => write!(f, "POKE_INT"),
+            OpCode::MakeStruct(name, _) => write!(f, "MAKE_STRUCT {}", name),
+            OpCode::StructGetField(field) => write!(f, "STRUCT_GET_FIELD {}", field),
         }
     }
 }
@@ -1133,6 +1163,8 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::PeekInt => println!("{}", instruction),
             OpCode::PeekValue => println!("{}", instruction),
             OpCode::PokeInt => println!("{}", instruction),
+            OpCode::MakeStruct(name, _) => println!("{} {}", instruction, name),
+            OpCode::StructGetField(field) => println!("{} {}", instruction, field),
         }
     }
     println!("======================\n");

@@ -39,6 +39,7 @@ pub enum LispExp {
     },
     Box(Value),
     RawPtr(usize),
+    Struct(String, Vec<String>, Vec<Value>),
 }
 
 use std::rc::Rc;
@@ -130,6 +131,18 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
             LispExp::Macro(_) => write!(f, "<macro>"),
             LispExp::Box(v) => write!(f, "box({})", v.as_gc_ref()),
             LispExp::RawPtr(addr) => write!(f, "0x{:x}", addr),
+
+            LispExp::Struct(name, fields, _) => {
+                write!(f, "{} (", name)?;
+
+                for (i, item) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, ")")
+            }
 
             _ => write!(f, "<unknown>"),
         }

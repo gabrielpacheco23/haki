@@ -247,5 +247,6 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         LispExp::Box(value) => Ok(LispExp::Box(value)),
         LispExp::HeapPtr(_) => todo!(),
         LispExp::RawPtr(_) => todo!(),
+        LispExp::Struct(_, items, values) => todo!(),
     }
 }

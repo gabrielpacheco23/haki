@@ -1,6 +1,18 @@
 (define rl (ffi-open "libraylib.so"))
 
-;; Mapeamento C
+;; ==========================================
+;; STRUCTS NATIVAS DO RAYLIB
+;; ==========================================
+(struct Color (r g b a))
+(struct Rectangle (x y w h))
+
+;; Utilitário interno: Converte a Struct Color do Haki para a memória C (uint 32-bits)
+(define (color->uint c)
+  (+ c:r (+ (* c:g 256) (+ (* c:b 65536) (* c:a 16777216)))))
+
+;; ==========================================
+;; MAPEAMENTO C E WRAPPERS
+;; ==========================================
 (define ptr-init-window (ffi-sym rl "InitWindow"))
 (define ptr-window-should-close (ffi-sym rl "WindowShouldClose"))
 (define ptr-begin-drawing (ffi-sym rl "BeginDrawing"))
@@ -10,25 +22,32 @@
 (define ptr-close-window (ffi-sym rl "CloseWindow"))
 (define ptr-is-key-down (ffi-sym rl "IsKeyDown"))
 (define ptr-set-target-fps (ffi-sym rl "SetTargetFPS"))
+(define ptr-get-screen-width (ffi-sym rl "GetScreenWidth"))
+(define ptr-get-screen-height (ffi-sym rl "GetScreenHeight"))
 
-;; Wrappers Lisp
 (define (init-window w h titulo)
   (ffi-call ptr-init-window "void" '("int" "int" "string") (list w h titulo)))
 
 (define (window-should-close)
-  (if (= (ffi-call ptr-window-should-close "int" '() '()) 1)
-    #t #f))
+  (if (= (ffi-call ptr-window-should-close "int" '() '()) 1) #t #f))
+
+(define (get-screen-width)
+  (ffi-call ptr-get-screen-width "int" '() '()))
+
+(define (get-screen-height)
+  (ffi-call ptr-get-screen-height "int" '() '()))
 
 (define (begin-drawing)
   (ffi-call ptr-begin-drawing "void" '() '()))
 
+;; O Wrapper agora recebe uma Struct 'Color' em vez de um número!
 (define (clear-background cor)
-  ;; Mudámos para "uint" para a cor não estourar!
-  (ffi-call ptr-clear-background "void" '("uint") (list cor)))
+  (ffi-call ptr-clear-background "void" '("uint") (list (color->uint cor))))
 
+;; O Wrapper agora converte a Struct 'cor' internamente
 (define (draw-rectangle x y w h cor)
-  ;; O último argumento agora é "uint"
-  (ffi-call ptr-draw-rectangle "void" '("int" "int" "int" "int" "uint") (list x y w h cor)))
+  (ffi-call ptr-draw-rectangle "void" '("int" "int" "int" "int" "uint") 
+            (list x y w h (color->uint cor))))
 
 (define (is-key-down tecla)
   (ffi-call ptr-is-key-down "bool" '("int") (list tecla)))
@@ -42,7 +61,6 @@
 (define (set-target-fps fps)
   (ffi-call ptr-set-target-fps "void" '("int") (list fps)))
 
-;; Empacota Cores (Little-Endian Linux)
-(define (rgba r g b a)
-  (+ r (+ (* g 256) (+ (* b 65536) (* a 16777216)))))
-
+;; KEYBOARD CONSTANTS
+(define KEY-RIGHT 262)
+(define KEY-LEFT 263)
