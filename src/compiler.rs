@@ -261,7 +261,7 @@ pub fn compile(
                     }
                 }
 
-                LispExp::Symbol(s, _) if s == "address-of" => {
+                LispExp::Symbol(s, _) if s == "addr" => {
                     if list.len() != 2 {
                         return Err("'address-of' requires 1 argument".to_string());
                     }

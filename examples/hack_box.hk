@@ -1,0 +1,25 @@
+;; Função hacker que altera variáveis sem usar os comandos oficiais da linguagem
+(define (hack-box! caixa novo-valor)
+  ;; 1. Pegamos o endereço base da memória do objeto
+  (define base-ptr (addr caixa))
+  
+  ;; 2. Injetamos o novo valor Lisp puro no offset 8
+  ;; (Pulando a etiqueta do Enum do Rust!)
+  (poke-value base-ptr 8 novo-valor)
+  
+  ;; Retorna uma mensagem de sucesso
+  "Hackeado com sucesso!")
+
+;; ==========================================
+;; O TESTE
+;; ==========================================
+(displayln "Criando uma caixa original:")
+(define segredo (box 1000))
+(display "Valor antes: ")
+(displayln (deref segredo))
+
+(displayln "\nInvocando a mutação física...")
+(hack-box! segredo "Agora sou uma String!")
+
+(display "Valor depois: ")
+(displayln (deref segredo))

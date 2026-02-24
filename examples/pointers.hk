@@ -19,7 +19,7 @@
 ;; ==========================================
 (displayln "\nTestando invasão de estruturas do Rust...")
 (define minha-caixa (box 999))
-(define endereco-base (address-of minha-caixa))
+(define endereco-base (addr minha-caixa))
 
 ;; Lemos a etiqueta do enum do Rust (offset 0)
 (display "Etiqueta (Discriminant) do Rust.: ")
