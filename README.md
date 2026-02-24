@@ -11,6 +11,7 @@ Inspired by Peter Norvig's elegant `lis.py` tutorial, Haki started as a simple "
 * **Actor Model Concurrency:** Erlang-style "share nothing" parallelism. Spawn fully isolated VMs in background OS threads that communicate safely via message passing (`send` and `receive`) without mutex locks.
 * **Tail Call Optimization (TCO):** Write infinite recursive loops without ever blowing up the call stack. Memory stays at O(1).
 * **Web & Data Ready:** Built-in TCP web server capabilities, native JSON parsing, structural data literals (`[]`, `{}`), and pipe operators (`|>`, `|>>`) for clean data transformations.
+* **Pointers**: Unlock the power of boxed (safe) and raw pointers for manipulating memory.
 
 ## 🚀 Quick Start
 
