@@ -1,0 +1,39 @@
+;; ==========================================
+;; 1. VENDO OS BITS REAIS
+;; ==========================================
+(define mem-c (malloc 8))
+;; Escrevemos o número 90 no primeiro byte
+(poke-byte mem-c 0 90)
+
+;; Agora vamos ler tudo e converter para Inteiro de forma limpa!
+(define lixo-bruto (deref mem-c))
+(display "Bits lidos em formato Decimal...: ")
+(displayln (bits->int lixo-bruto)) ;; Imprime 90 em vez de 0.000...!
+
+(display "Bits lidos em formato Hexadecimal.: ")
+(displayln (hex lixo-bruto))    ;; Imprime 0x5A!
+(free mem-c)
+
+;; ==========================================
+;; 2. INVADINDO O BOX COM PTR-ADD E POKE-VALUE
+;; ==========================================
+(displayln "\nTestando invasão de estruturas do Rust...")
+(define minha-caixa (box 999))
+(define endereco-base (address-of minha-caixa))
+
+;; Lemos a etiqueta do enum do Rust (offset 0)
+(display "Etiqueta (Discriminant) do Rust.: ")
+(displayln (bits->int (deref endereco-base))) ;; Ex: 14
+
+;; O SEGREDO: Pulamos 8 bytes para a frente usando aritmética de ponteiros!
+(define endereco-payload (ptr-add endereco-base 8))
+
+(display "Lendo o valor do Box fisicamente: ")
+(displayln (deref endereco-payload)) ;; VAI IMPRIMIR 999 PERFEITAMENTE!
+
+;; Vamos adulterar o Box invadindo a RAM (sem usar o set-box!)
+(displayln "Injetando o número 777 fisicamente na memória...")
+(poke-value endereco-base 8 777)
+
+(display "Resultado do deref oficial.....: ")
+(displayln (deref minha-caixa)) ;; Imprime 777! O Box foi hackeado.

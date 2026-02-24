@@ -1335,6 +1335,26 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let bits: u64 = unsafe { std::mem::transmute(args[0]) };
             Ok(Value::number(bits as f64))
         });
+
+        add_native!(env, heap, "zero-mem", |args, _, h| {
+            if args.len() != 2 {
+                return Err("zero-mem requires 2 args (ptr tamanho_em_bytes)".to_string());
+            }
+
+            let ptr_val = args[0];
+            let size = args[1].as_number() as usize;
+
+            if let Some(LispExp::RawPtr(addr)) = h.get(ptr_val) {
+                // write_bytes é a ponte do Rust para o 'memset'
+                unsafe {
+                    std::ptr::write_bytes(*addr as *mut u8, 0, size);
+                }
+
+                Ok(Value::void())
+            } else {
+                Err("zero-mem requires a valid raw pointer".to_string())
+            }
+        });
     }
 
     lisp_env

@@ -64,6 +64,11 @@ pub enum OpCode {
     AddressOf,
     PeekByte,
     PokeByte,
+    PtrAdd,
+    PokeValue,
+    PeekValue,
+    PeekInt,
+    PokeInt,
 }
 
 #[derive(Clone, Debug)]
@@ -898,6 +903,38 @@ impl Vm {
                         return Err("'peek-byte' expects a raw pointer".to_string());
                     }
                 }
+                OpCode::PeekInt => {
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+
+                        // Lemos os 64-bits da memória bruta como um número Inteiro (u64)
+                        let bits = unsafe { *(physical_addr as *const u64) };
+                        self.stack.push(Value::number(bits as f64));
+                    } else {
+                        return Err("'peek-int' exige um RawPtr".to_string());
+                    }
+                }
+
+                OpCode::PeekValue => {
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+
+                        // Lemos os 64-bits assumindo que é um objeto Lisp real escondido ali
+                        let val = unsafe { *(physical_addr as *const Value) };
+
+                        self.stack.push(val);
+                    } else {
+                        return Err("'peek-value' exige um RawPtr".to_string());
+                    }
+                }
                 OpCode::PokeByte => {
                     let val = self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as u8;
                     let offset =
@@ -915,6 +952,57 @@ impl Vm {
                         self.stack.push(Value::void());
                     } else {
                         return Err("'poke-byte' expects a raw pointer".to_string());
+                    }
+                }
+                OpCode::PtrAdd => {
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let new_ptr = heap.alloc(LispExp::RawPtr(addr + offset));
+                        self.stack.push(new_ptr);
+                    } else {
+                        return Err("'ptr-add' expects a raw pointer".to_string());
+                    }
+                }
+                OpCode::PokeInt => {
+                    let val = self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as u64;
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+
+                        // Sobrescreve 8 bytes inteiros na RAM
+                        unsafe {
+                            *(physical_addr as *mut u64) = val;
+                        }
+
+                        self.stack.push(Value::void());
+                    } else {
+                        return Err("'poke-int' requires a raw pointer".to_string());
+                    }
+                }
+
+                OpCode::PokeValue => {
+                    let val = self.stack.pop().unwrap_or(Value::void());
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+
+                        // Gravamos os 8 bytes (64-bits) do 'Value' na memória física!
+                        unsafe {
+                            *(physical_addr as *mut Value) = val;
+                        }
+
+                        self.stack.push(Value::void());
+                    } else {
+                        return Err("'poke-value' expecccts a raw pointer".to_string());
                     }
                 }
             }
@@ -969,6 +1057,11 @@ impl Display for OpCode {
             OpCode::AddressOf => write!(f, "ADDRESS_OF"),
             OpCode::PeekByte => write!(f, "PEEK_BYTE"),
             OpCode::PokeByte => write!(f, "POKE_BYTE"),
+            OpCode::PokeValue => write!(f, "POKE_VALUE"),
+            OpCode::PtrAdd => write!(f, "PTR_ADD"),
+            OpCode::PeekInt => write!(f, "PEEK_INT"),
+            OpCode::PeekValue => write!(f, "PEEK_VALUE"),
+            OpCode::PokeInt => write!(f, "POKE_INT"),
         }
     }
 }
@@ -1035,6 +1128,11 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::AddressOf => println!("{}", instruction),
             OpCode::PeekByte => println!("{}", instruction),
             OpCode::PokeByte => println!("{}", instruction),
+            OpCode::PokeValue => println!("{}", instruction),
+            OpCode::PtrAdd => println!("{}", instruction),
+            OpCode::PeekInt => println!("{}", instruction),
+            OpCode::PeekValue => println!("{}", instruction),
+            OpCode::PokeInt => println!("{}", instruction),
         }
     }
     println!("======================\n");

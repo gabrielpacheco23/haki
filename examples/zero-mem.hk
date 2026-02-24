@@ -1,0 +1,19 @@
+;; 1. Aloca 8 bytes (1 inteiro de 64-bits) e vem CHEIO DE LIXO
+(define mem (malloc 8))
+(display "Memória recém alocada (com lixo do SO).: ")
+(displayln (peek-int mem 0)) ;; Vai imprimir um número bizarro!
+
+;; 2. A Vassoura: Zeramos os 8 bytes instantaneamente!
+(zero-mem mem 8)
+(display "Memória após o zero-mem.............: ")
+(displayln (peek-int mem 0)) ;; Imprime um 0 redondo e perfeito!
+
+;; 3. Escrevemos 64-bits de uma vez (esmagando os 8 bytes)
+(poke-int mem 0 255)
+
+;; 4. Lemos 64-bits de uma vez
+(display "Memória após o poke-int 255............: ")
+(displayln (peek-int mem 0)) ;; Imprime exatamente 255!
+
+;; E lembre-se sempre de libertar!
+(free mem)

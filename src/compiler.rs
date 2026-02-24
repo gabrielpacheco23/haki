@@ -282,6 +282,28 @@ pub fn compile(
                         chunk.write(OpCode::Return, current_line);
                     }
                 }
+                LispExp::Symbol(s, _) if s == "peek-int" => {
+                    if list.len() != 3 {
+                        return Err("'peek-int' expects 2 args (ptr offset)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    chunk.write(OpCode::PeekInt, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "peek-value" => {
+                    if list.len() != 3 {
+                        return Err("'peek-value' expects 2 args (ptr offset)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    chunk.write(OpCode::PeekValue, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
                 LispExp::Symbol(s, _) if s == "poke-byte" => {
                     if list.len() != 4 {
                         return Err("'poke-byte' requires 3 args (ptr offset val)".to_string());
@@ -290,6 +312,41 @@ pub fn compile(
                     compile(&list[2], chunk, false, heap, state, current_line)?; // offset
                     compile(&list[3], chunk, false, heap, state, current_line)?; // valor
                     chunk.write(OpCode::PokeByte, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "ptr-add" => {
+                    if list.len() != 3 {
+                        return Err("'ptr-add' requires 2 args (ptr offset)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    chunk.write(OpCode::PtrAdd, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "poke-int" => {
+                    if list.len() != 4 {
+                        return Err("'poke-int' requires 3 args (ptr offset val)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    compile(&list[3], chunk, false, heap, state, current_line)?; // valor
+                    chunk.write(OpCode::PokeInt, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "poke-value" => {
+                    if list.len() != 4 {
+                        return Err("'poke-value' requires 3 args (ptr offset val)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    compile(&list[3], chunk, false, heap, state, current_line)?; // valor
+                    chunk.write(OpCode::PokeValue, current_line);
                     if is_tail {
                         chunk.write(OpCode::Return, current_line);
                     }
