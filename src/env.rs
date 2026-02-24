@@ -4,7 +4,7 @@ use rand::RngExt;
 use regex::Regex;
 
 use crate::heap::{Heap, collect_garbage};
-use crate::helpers::{apply_procedure, ast_to_value, value_to_ast};
+use crate::helpers::{apply_procedure, ast_to_value, pairs_to_vec, value_to_ast};
 use crate::{compare_op, def_fold, def_is, def_math};
 use crate::{expr::*, run_script};
 use std::cell::RefCell;
@@ -15,6 +15,10 @@ use std::{collections::HashMap as RustHashMap, rc::Rc};
 use std::process::Command;
 
 use std::sync::{Mutex, OnceLock, mpsc};
+
+use libffi::middle::{Arg, Cif, Type};
+use libloading::{Library, Symbol};
+use std::ffi::CString;
 
 // FFI (C)
 unsafe extern "C" {
@@ -1353,6 +1357,220 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 Ok(Value::void())
             } else {
                 Err("zero-mem requires a valid raw pointer".to_string())
+            }
+        });
+
+        add_native!(env, heap, "ffi-open", |args, _, h| {
+            if let Some(LispExp::Str(path)) = h.get(args[0]) {
+                let lib = unsafe { Library::new(path).map_err(|e| e.to_string())? };
+                // Escondemos o Library num ponteiro bruto para o Haki segurar
+                let ptr = Box::into_raw(Box::new(lib)) as usize;
+                return Ok(h.alloc(LispExp::RawPtr(ptr)));
+            }
+            Err("ffi-open expects the library path (ex: 'raylib.a')".to_string())
+        });
+
+        add_native!(env, heap, "ffi-sym", |args, _, h| {
+            if let (Some(LispExp::RawPtr(lib_ptr)), Some(LispExp::Str(sym_name))) =
+                (h.get(args[0]), h.get(args[1]))
+            {
+                let lib = unsafe { &*(*lib_ptr as *const Library) };
+
+                let sym: Symbol<unsafe extern "C" fn()> =
+                    unsafe { lib.get(sym_name.as_bytes()).map_err(|e| e.to_string())? };
+
+                // Pegamos o endereço de memória real da função C
+                let func_ptr = *sym as usize;
+                return Ok(h.alloc(LispExp::RawPtr(func_ptr)));
+            }
+            Err("ffi-sym expects a raw ptr (library) and a String (function name)".to_string())
+        });
+
+        add_native!(env, heap, "ffi-call", |args, e, h| {
+            if args.len() != 4 {
+                return Err(
+                    "ffi-call expects 4 args: (ptr ret-type arg-types arg-values)".to_string(),
+                );
+            }
+
+            // 1. O Ponteiro da Função C e o Tipo de Retorno esperado
+            let func_ptr = if let Some(LispExp::RawPtr(p)) = h.get(args[0]) {
+                *p
+            } else {
+                return Err("Invalid pointer".to_string());
+            };
+            let ret_type_str = if let Some(LispExp::Str(s)) = h.get(args[1]) {
+                s.clone()
+            } else {
+                "void".to_string()
+            };
+
+            // 2. Extrair a lista de Tipos (Ex: "int", "float", "string") do Heap
+            let mut type_strs = vec![];
+            if let Some(exp) = h.get(args[2]) {
+                let t_list = if let LispExp::Pair(_, _) = exp {
+                    pairs_to_vec(exp, h)
+                } else {
+                    exp.clone()
+                };
+                if let LispExp::List(items, _) = t_list {
+                    for item in items {
+                        if let LispExp::Str(s) = item {
+                            type_strs.push(s);
+                        }
+                    }
+                }
+            }
+
+            // 3. Extrair a lista de Valores reais do Haki
+            let mut arg_vals = vec![];
+            if let Some(exp) = h.get(args[3]) {
+                let v_list = if let LispExp::Pair(_, _) = exp {
+                    pairs_to_vec(exp, h)
+                } else {
+                    exp.clone()
+                };
+                if let LispExp::List(items, _) = v_list {
+                    for item in items {
+                        // Força a avaliação das sub-expressões para obtermos os Values finais
+                        arg_vals.push(ast_to_value(&item, h));
+                    }
+                }
+            }
+
+            if type_strs.len() != arg_vals.len() {
+                return Err("ffi-call: The number of types does not match the values".to_string());
+            }
+
+            // ========================================================================
+            // O COFRE DE MEMÓRIA (Impede que o Rust destrua os dados antes do C rodar!)
+            // ========================================================================
+            let mut i32_store: Vec<Box<i32>> = vec![];
+            let mut u32_store: Vec<Box<u32>> = vec![];
+            let mut f32_store: Vec<Box<f32>> = vec![];
+            let mut cstring_store: Vec<CString> = vec![];
+            let mut ptr_store: Vec<Box<*const std::ffi::c_char>> = vec![];
+            let mut raw_ptr_store: Vec<Box<usize>> = vec![];
+
+            let mut ffi_types = vec![];
+
+            // 4. Mapear os tipos e fixar os valores no Cofre
+            for (t_str, val) in type_strs.iter().zip(arg_vals.iter()) {
+                match t_str.as_str() {
+                    "int" => {
+                        let v = val.as_number() as i32;
+                        i32_store.push(Box::new(v));
+                        ffi_types.push(Type::i32());
+                    }
+                    "uint" => {
+                        let v = val.as_number() as u32;
+                        u32_store.push(Box::new(v));
+                        ffi_types.push(Type::u32());
+                    }
+                    "float" => {
+                        let v = val.as_number() as f32;
+                        f32_store.push(Box::new(v));
+                        ffi_types.push(Type::f32());
+                    }
+                    "string" => {
+                        let s = if let Some(LispExp::Str(str_val)) = h.get(*val) {
+                            str_val.clone()
+                        } else {
+                            "".to_string()
+                        };
+                        let cstr = CString::new(s).unwrap();
+                        ptr_store.push(Box::new(cstr.as_ptr()));
+                        cstring_store.push(cstr); // Mantém a string viva na RAM
+                        ffi_types.push(Type::pointer());
+                    }
+                    "pointer" => {
+                        let p = if let Some(LispExp::RawPtr(ptr_val)) = h.get(*val) {
+                            *ptr_val
+                        } else {
+                            0
+                        };
+                        raw_ptr_store.push(Box::new(p));
+                        ffi_types.push(Type::pointer());
+                    }
+                    _ => return Err(format!("Unknown FFI type in Haki: {}", t_str)),
+                }
+            }
+
+            // 5. Construir os Argumentos (Agarrando as referências protegidas do Cofre)
+            let mut ffi_args = vec![];
+            let mut i32_idx = 0;
+            let mut u32_idx = 0;
+            let mut f32_idx = 0;
+            let mut ptr_idx = 0;
+            let mut raw_idx = 0;
+
+            for t_str in &type_strs {
+                match t_str.as_str() {
+                    "int" => {
+                        ffi_args.push(Arg::new(&*i32_store[i32_idx]));
+                        i32_idx += 1;
+                    }
+                    "uint" => {
+                        ffi_args.push(Arg::new(&*u32_store[u32_idx]));
+                        u32_idx += 1;
+                    }
+                    "float" => {
+                        ffi_args.push(Arg::new(&*f32_store[f32_idx]));
+                        f32_idx += 1;
+                    }
+                    "string" => {
+                        ffi_args.push(Arg::new(&*ptr_store[ptr_idx]));
+                        ptr_idx += 1;
+                    }
+                    "pointer" => {
+                        ffi_args.push(Arg::new(&*raw_ptr_store[raw_idx]));
+                        raw_idx += 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            // 6. Configurar o Tipo de Retorno esperado pelo Lisp
+            let ret_type = match ret_type_str.as_str() {
+                "int" => Type::i32(),
+                "float" => Type::f32(),
+                "pointer" => Type::pointer(),
+                "bool" => Type::u8(),
+                _ => Type::void(),
+            };
+
+            // 7. Compilar a Assinatura (CIF) e Executar no Processador!
+            let cif = Cif::new(ffi_types.into_iter(), ret_type);
+            let code_ptr = libffi::middle::CodePtr::from_ptr(func_ptr as *mut _);
+
+            unsafe {
+                match ret_type_str.as_str() {
+                    "int" => {
+                        let res: i32 = cif.call(code_ptr, ffi_args.as_slice());
+                        Ok(Value::number(res as f64))
+                    }
+                    "uint" => {
+                        let res: u32 = cif.call(code_ptr, ffi_args.as_slice());
+                        Ok(Value::number(res as f64))
+                    }
+                    "float" => {
+                        let res: f32 = cif.call(code_ptr, ffi_args.as_slice());
+                        Ok(Value::number(res as f64))
+                    }
+                    "pointer" => {
+                        let res: usize = cif.call(code_ptr, ffi_args.as_slice());
+                        // Alocamos o ponteiro retornado pelo C no nosso heap e devolvemos ao Lisp
+                        Ok(h.alloc(LispExp::RawPtr(res)))
+                    }
+                    "bool" => {
+                        let res: u8 = cif.call(code_ptr, ffi_args.as_slice());
+                        Ok(Value::number(res as f64))
+                    }
+                    _ => {
+                        cif.call::<()>(code_ptr, ffi_args.as_slice());
+                        Ok(Value::void())
+                    }
+                }
             }
         });
     }

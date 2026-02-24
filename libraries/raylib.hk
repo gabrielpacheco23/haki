@@ -1,0 +1,48 @@
+(define rl (ffi-open "libraylib.so"))
+
+;; Mapeamento C
+(define ptr-init-window (ffi-sym rl "InitWindow"))
+(define ptr-window-should-close (ffi-sym rl "WindowShouldClose"))
+(define ptr-begin-drawing (ffi-sym rl "BeginDrawing"))
+(define ptr-clear-background (ffi-sym rl "ClearBackground"))
+(define ptr-draw-rectangle (ffi-sym rl "DrawRectangle"))
+(define ptr-end-drawing (ffi-sym rl "EndDrawing"))
+(define ptr-close-window (ffi-sym rl "CloseWindow"))
+(define ptr-is-key-down (ffi-sym rl "IsKeyDown"))
+(define ptr-set-target-fps (ffi-sym rl "SetTargetFPS"))
+
+;; Wrappers Lisp
+(define (init-window w h titulo)
+  (ffi-call ptr-init-window "void" '("int" "int" "string") (list w h titulo)))
+
+(define (window-should-close)
+  (if (= (ffi-call ptr-window-should-close "int" '() '()) 1)
+    #t #f))
+
+(define (begin-drawing)
+  (ffi-call ptr-begin-drawing "void" '() '()))
+
+(define (clear-background cor)
+  ;; Mudámos para "uint" para a cor não estourar!
+  (ffi-call ptr-clear-background "void" '("uint") (list cor)))
+
+(define (draw-rectangle x y w h cor)
+  ;; O último argumento agora é "uint"
+  (ffi-call ptr-draw-rectangle "void" '("int" "int" "int" "int" "uint") (list x y w h cor)))
+
+(define (is-key-down tecla)
+  (ffi-call ptr-is-key-down "bool" '("int") (list tecla)))
+
+(define (end-drawing)
+  (ffi-call ptr-end-drawing "void" '() '()))
+
+(define (close-window)
+  (ffi-call ptr-close-window "void" '() '()))
+
+(define (set-target-fps fps)
+  (ffi-call ptr-set-target-fps "void" '("int") (list fps)))
+
+;; Empacota Cores (Little-Endian Linux)
+(define (rgba r g b a)
+  (+ r (+ (* g 256) (+ (* b 65536) (* a 16777216)))))
+

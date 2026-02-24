@@ -613,10 +613,17 @@ pub fn compile(
 
                     for (i, expr) in list[1..].iter().enumerate() {
                         let last = i == list.len() - 2;
+
+                        let is_define = if let LispExp::List(items, _) = expr {
+                            matches!(items.first(), Some(LispExp::Symbol(name,_ )) if name == "define")
+                        } else {
+                            false
+                        };
+
                         // O último item herda o is_tail do bloco inteiro
                         compile(expr, chunk, last && is_tail, heap, state, current_line)?;
                         // Joga os retornos inúteis fora, exceto o do último item
-                        if !last {
+                        if !last && !is_define {
                             chunk.write(OpCode::Pop, current_line);
                         }
                     }
