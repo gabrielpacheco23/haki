@@ -16,6 +16,12 @@ use std::process::Command;
 
 use std::sync::{Mutex, OnceLock, mpsc};
 
+// FFI (C)
+unsafe extern "C" {
+    fn malloc(size: usize) -> *mut u8;
+    fn free(ptr: *mut u8);
+}
+
 static ACTOR_REGISTRY: OnceLock<Mutex<RustHashMap<usize, mpsc::Sender<String>>>> = OnceLock::new();
 
 static NEXT_PID: OnceLock<Mutex<usize>> = OnceLock::new();
@@ -1248,6 +1254,86 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             } else {
                 Err("This process has no mailbox!".to_string())
             }
+        });
+
+        // add_native!(env, heap, "malloc", |args, e, h| native_malloc(args, e, h));
+
+        add_native!(env, heap, "malloc", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'malloc' requires 1 argument (size in bytes)".to_string());
+            }
+
+            let size = args[0].as_number() as usize;
+            let raw_address = unsafe { malloc(size) } as usize;
+
+            if raw_address == 0 {
+                return Err("Out of memory (malloc failed)".to_string());
+            }
+
+            let ptr_obj = h.alloc(LispExp::RawPtr(raw_address));
+            Ok(ptr_obj)
+        });
+
+        add_native!(env, heap, "free", |args, e, h| {
+            if args.len() != 1 {
+                return Err("'free' requires 1 argument (raw pointer)".to_string());
+            }
+
+            let ptr_val = args[0];
+            if let Some(LispExp::RawPtr(addr)) = h.get(ptr_val) {
+                // Entregamos o endereço de volta ao C para libertar a RAM
+                unsafe { free(*addr as *mut u8) };
+                Ok(Value::void())
+            } else {
+                Err("'free' requires a valid raw pointer".to_string())
+            }
+        });
+
+        add_native!(env, heap, "char->int", |args, e, h| {
+            if args.len() != 1 {
+                return Err("char->int expects 1 argument (string)".to_string());
+            }
+
+            if args[0].is_gc_ref() {
+                if let Some(LispExp::Str(s)) = h.get(args[0]) {
+                    if let Some(c) = s.chars().next() {
+                        return Ok(Value::number(c as u32 as f64));
+                    }
+                }
+            }
+            Err("char->int expects a valid string".to_string())
+        });
+        add_native!(env, heap, "int->char", |args, e, h| {
+            if args.len() != 1 {
+                return Err("int->char expects 1 argument (number)".to_string());
+            }
+
+            let code = args[0].as_number() as u32;
+            if let Some(c) = std::char::from_u32(code) {
+                let s = c.to_string();
+                return Ok(h.alloc_string(s));
+            }
+
+            Err("int->char received an invalid char code".to_string())
+        });
+
+        add_native!(env, heap, "hex", |args, _, h| {
+            if args.len() != 1 {
+                return Err("'hex' requires 1 argument".to_string());
+            }
+
+            let bits: u64 = unsafe { std::mem::transmute(args[0]) };
+            let hex_str = format!("0x{:x}", bits);
+            Ok(h.alloc_string(hex_str))
+        });
+
+        add_native!(env, heap, "bits->int", |args, _, _| {
+            if args.len() != 1 {
+                return Err("bits->int requires 1 argument".to_string());
+            }
+
+            let bits: u64 = unsafe { std::mem::transmute(args[0]) };
+            Ok(Value::number(bits as f64))
         });
     }
 

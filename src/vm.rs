@@ -58,6 +58,12 @@ pub enum OpCode {
     MakeClosure(Vec<String>, Rc<Chunk>, Vec<CompilerUpvalue>),
     Eval,
     Apply,
+    Box,
+    Deref,
+    SetBox,
+    AddressOf,
+    PeekByte,
+    PokeByte,
 }
 
 #[derive(Clone, Debug)]
@@ -826,6 +832,91 @@ impl Vm {
                         closure_upvalues: vec![],
                     });
                 }
+                OpCode::Box => {
+                    let val = self.stack.pop().unwrap_or(Value::void());
+                    let ptr = heap.alloc(LispExp::Box(val));
+                    self.stack.push(ptr);
+                }
+                OpCode::Deref => {
+                    let ptr_val = self.stack.pop().unwrap_or(Value::void());
+                    if ptr_val.is_gc_ref() {
+                        match heap.get(ptr_val) {
+                            Some(LispExp::Box(inner_val)) => {
+                                self.stack.push(*inner_val);
+                                continue;
+                            }
+                            Some(LispExp::RawPtr(addr)) => {
+                                let val = unsafe { *(*addr as *const Value) };
+                                self.stack.push(val);
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Err("'deref' requires a pointer".to_string());
+                }
+                OpCode::SetBox => {
+                    let new_val = self.stack.pop().unwrap_or(Value::void());
+                    let ptr_val = self.stack.pop().unwrap_or(Value::void());
+
+                    if ptr_val.is_gc_ref() {
+                        if let Some(LispExp::Box(val)) = heap.get_mut(ptr_val) {
+                            *val = new_val;
+                            self.stack.push(Value::void());
+                            continue;
+                        }
+                    }
+                    return Err("'set-box!' requires a box pointer".to_string());
+                }
+                OpCode::AddressOf => {
+                    let obj = self.stack.pop().unwrap_or(Value::void());
+                    if obj.is_gc_ref() {
+                        let idx = obj.as_gc_ref();
+                        let raw_addr =
+                            heap.memory.as_ptr() as usize + (idx * std::mem::size_of::<LispExp>());
+
+                        let ptr_obj = heap.alloc(LispExp::RawPtr(raw_addr));
+                        self.stack.push(ptr_obj);
+                    } else {
+                        return Err(
+                            "'address-of' expects a heap object (Box, String, etc)".to_string()
+                        );
+                    }
+                }
+                OpCode::PeekByte => {
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+                        // UNSAFE
+                        let byte = unsafe { *(physical_addr as *const u8) };
+
+                        self.stack.push(Value::number(byte as f64));
+                    } else {
+                        return Err("'peek-byte' expects a raw pointer".to_string());
+                    }
+                }
+                OpCode::PokeByte => {
+                    let val = self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as u8;
+                    let offset =
+                        self.stack.pop().unwrap_or(Value::number(0.0)).as_number() as usize;
+                    let ptr_obj = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::RawPtr(addr)) = heap.get(ptr_obj) {
+                        let physical_addr = addr + offset;
+
+                        // ESCRITA BRUTA: Alteramos o byte na RAM do SO
+                        unsafe {
+                            *(physical_addr as *mut u8) = val;
+                        }
+
+                        self.stack.push(Value::void());
+                    } else {
+                        return Err("'poke-byte' expects a raw pointer".to_string());
+                    }
+                }
             }
         }
     }
@@ -872,6 +963,12 @@ impl Display for OpCode {
             OpCode::VectorRef => write!(f, "VECTOR_REF"),
             OpCode::Eval => write!(f, "EVAL"),
             OpCode::Apply => write!(f, "APPLY"),
+            OpCode::Box => write!(f, "BOX"),
+            OpCode::Deref => write!(f, "DEREF"),
+            OpCode::SetBox => write!(f, "SET_BOX"),
+            OpCode::AddressOf => write!(f, "ADDRESS_OF"),
+            OpCode::PeekByte => write!(f, "PEEK_BYTE"),
+            OpCode::PokeByte => write!(f, "POKE_BYTE"),
         }
     }
 }
@@ -932,6 +1029,12 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::VectorRef => println!("{}", instruction),
             OpCode::Eval => println!("{}", instruction),
             OpCode::Apply => println!("{}", instruction),
+            OpCode::Box => println!("{}", instruction),
+            OpCode::Deref => println!("{}", instruction),
+            OpCode::SetBox => println!("{}", instruction),
+            OpCode::AddressOf => println!("{}", instruction),
+            OpCode::PeekByte => println!("{}", instruction),
+            OpCode::PokeByte => println!("{}", instruction),
         }
     }
     println!("======================\n");

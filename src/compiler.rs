@@ -229,6 +229,72 @@ pub fn compile(
                         _ => return Err("Invalid set!".to_string()),
                     }
                 }
+                LispExp::Symbol(s, _) if s == "box" => {
+                    if list.len() != 2 {
+                        return Err("'box' requires 1 argument".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::Box, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "deref" => {
+                    if list.len() != 2 {
+                        return Err("'deref' requires 1 argument".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::Deref, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "set-box!" => {
+                    if list.len() != 3 {
+                        return Err("'set-box!' requires 2 arguments".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // O ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // O novo valor
+                    chunk.write(OpCode::SetBox, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
+                LispExp::Symbol(s, _) if s == "address-of" => {
+                    if list.len() != 2 {
+                        return Err("'address-of' requires 1 argument".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?;
+                    chunk.write(OpCode::AddressOf, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "peek-byte" => {
+                    if list.len() != 3 {
+                        return Err("'peek-byte' requires 2 args (ptr offset)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    chunk.write(OpCode::PeekByte, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+                LispExp::Symbol(s, _) if s == "poke-byte" => {
+                    if list.len() != 4 {
+                        return Err("'poke-byte' requires 3 args (ptr offset val)".to_string());
+                    }
+                    compile(&list[1], chunk, false, heap, state, current_line)?; // ponteiro
+                    compile(&list[2], chunk, false, heap, state, current_line)?; // offset
+                    compile(&list[3], chunk, false, heap, state, current_line)?; // valor
+                    chunk.write(OpCode::PokeByte, current_line);
+                    if is_tail {
+                        chunk.write(OpCode::Return, current_line);
+                    }
+                }
+
                 LispExp::Symbol(s, _) if s == "inline" => match &list[1] {
                     LispExp::List(header, _) if !header.is_empty() => {
                         if let LispExp::Symbol(name, _) = &header[0] {

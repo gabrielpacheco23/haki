@@ -1,0 +1,27 @@
+(displayln "A invocar o malloc do C...")
+
+;; Aloca 4 bytes fisicamente na RAM do sistema operativo!
+;; O Garbage Collector do Haki NÃO FAZ IDEIA de que isto existe.
+(define meu-bloco-c (malloc 4))
+
+(display "O endereço fisico puro devolvido pelo C: ")
+(displayln meu-bloco-c)
+
+;; Vamos usar os nossos OpCodes Raw para escrever a palavra "Olá" diretamente nos bytes!
+;; (79 = O, 108 = l, 225 = á)
+(poke-byte meu-bloco-c 0 79)
+(poke-byte meu-bloco-c 1 108)
+(poke-byte meu-bloco-c 2 225)
+(poke-byte meu-bloco-c 3 0) ;; Fim da string em C (Null-terminator)
+
+(displayln "Lendo a memoria diretamente com peek-byte:")
+(display "Byte 0: ") (displayln (peek-byte meu-bloco-c 0))
+(display "Byte 1: ") (displayln (peek-byte meu-bloco-c 1))
+(display "Byte 2: ") (displayln (peek-byte meu-bloco-c 2))
+
+;; O GRANDE PERIGO: Se você não chamar o 'free', 
+;; terá causado o seu primeiro MEMORY LEAK nativo através de Lisp!
+(displayln "A libertar a memoria do sistema...")
+(free meu-bloco-c)
+
+(displayln "Sucesso! Sem fugas de memoria.")

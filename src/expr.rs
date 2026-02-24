@@ -37,6 +37,8 @@ pub enum LispExp {
         chunk: Rc<Chunk>,
         upvalues: Vec<Upvalue>,
     },
+    Box(Value),
+    RawPtr(usize),
 }
 
 use std::rc::Rc;
@@ -126,6 +128,9 @@ impl<'a> std::fmt::Display for AstFmt<'a> {
                 write!(f, " }}")
             }
             LispExp::Macro(_) => write!(f, "<macro>"),
+            LispExp::Box(v) => write!(f, "box({})", v.as_gc_ref()),
+            LispExp::RawPtr(addr) => write!(f, "0x{:x}", addr),
+
             _ => write!(f, "<unknown>"),
         }
     }

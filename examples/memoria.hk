@@ -1,0 +1,52 @@
+;; ==========================================
+;; FFI: MANIPULAÇÃO DIRETA DE MEMÓRIA (C-ABI)
+;; ==========================================
+
+;; Função recursiva para escrever uma lista de bytes na RAM
+(define (escreve-bytes ptr offset lista)
+  (if (equal? lista '())
+      ;; Se a lista acabou, colocamos o Null-Terminator (0) do C
+      (poke-byte ptr offset 0)
+      (begin
+        ;; Escreve o byte atual na memória física
+        (poke-byte ptr offset (car lista))
+        ;; Chama a recursão para o próximo byte (offset + 1)
+        (escreve-bytes ptr (+ offset 1) (cdr lista)))))
+
+;; Função recursiva para ler da RAM até encontrar o Null-Terminator (0)
+(define (le-bytes ptr offset)
+  (let ((byte (peek-byte ptr offset)))
+    (if (= byte 0)
+        (displayln "\n[Fim de Leitura]")
+        (begin
+          (display byte)
+          (display " ")
+          (le-bytes ptr (+ offset 1))))))
+
+;; 1. ALOCAÇÃO
+(displayln ">>> 1. Alocando 10 bytes de RAM via C (malloc)...")
+(define meu-bloco (malloc 10))
+(display "Endereço físico: ")
+(displayln meu-bloco)
+
+;; 2. ESCRITA
+(displayln "\n>>> 2. Escrevendo os bytes 72 65 75 73 ('HAKI')...")
+(escreve-bytes meu-bloco 0 '(72 65 75 73))
+
+;; 3. LEITURA
+(displayln "\n>>> 3. Lendo os bytes diretamente da RAM:")
+(le-bytes meu-bloco 0)
+
+;; 4. LIBERTAÇÃO
+(displayln "\n>>> 4. Devolvendo a memória ao Sistema Operativo (free)...")
+(free meu-bloco)
+(displayln "Memória libertada com sucesso!")
+
+;; ==========================================
+;; O TESTE DE FOGO (Descomente por sua conta e risco!)
+;; ==========================================
+;; Se o free funcionou, tentar ler o bloco agora vai causar
+;; um Crash violento (Segmentation Fault) no seu SO!
+;;
+(displayln "Tentando acessar memória libertada...")
+(displayln (peek-byte meu-bloco 0))

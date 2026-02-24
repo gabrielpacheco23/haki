@@ -142,6 +142,9 @@ impl Heap {
                         self.mark_lisp_exp(&item);
                     }
                 }
+                LispExp::Box(val) => {
+                    self.worklist.push(val);
+                }
                 _ => {}
             }
         }

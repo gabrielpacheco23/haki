@@ -235,7 +235,6 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
             }
         }
         LispExp::Void => Ok(LispExp::Void),
-        // TODO: check this
         LispExp::Nil => Ok(LispExp::List(vec![], 0)),
         LispExp::Pair(_, _) => {
             let ast_list = pairs_to_vec(&exp, heap);
@@ -245,6 +244,8 @@ pub fn eval(exp: LispExp, env: &mut Env, heap: &mut Heap) -> Result<LispExp, Str
         val @ LispExp::VmClosure { .. } => Ok(val),
         LispExp::Vector(v_ref) => Ok(LispExp::Vector(v_ref)),
         LispExp::HashMap(map_ref) => Ok(LispExp::HashMap(map_ref)),
+        LispExp::Box(value) => Ok(LispExp::Box(value)),
         LispExp::HeapPtr(_) => todo!(),
+        LispExp::RawPtr(_) => todo!(),
     }
 }
