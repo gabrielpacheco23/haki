@@ -1,7 +1,7 @@
 ;; ==========================================
 ;; HAKI LISP GAME ENGINE (RAYLIB)
 ;; ==========================================
-(require "../libraries/raylib.hk")
+(require "/home/pachequinho/Documents/rustprojs/haki/libraries/raylib.hk")
 
 (define cor-fundo (rgba 30 30 40 255))
 (define cor-vermelha (rgba 230 41 55 255))
