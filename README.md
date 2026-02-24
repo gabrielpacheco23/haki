@@ -91,7 +91,7 @@ Haki is ready for the web. Use the native `http-get` and JSON parser to interact
 
 ```scheme
 ;; Fetch data from an API and parse it natively
-(define raw-response (http-get "[https://dummyjson.com/products/1](https://dummyjson.com/products/1)"))
+(define raw-response (http-get "https://dummyjson.com/products/1"))
 (define product (parse-json raw-response))
 
 (display "Product Name: ")
