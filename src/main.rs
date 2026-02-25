@@ -109,7 +109,7 @@ pub fn run_source(
                 last_result = vm.execute(Rc::new(chunk), env.clone(), heap, is_repl)?;
             }
         }
-        collect_garbage(heap, env, last_result, &vm.stack, debug_gc);
+        collect_garbage(heap, env, last_result, &vm.stack, &vm.frames, debug_gc);
     }
 
     Ok(value_to_ast(last_result, heap))

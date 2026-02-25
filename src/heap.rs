@@ -1,6 +1,6 @@
 use crate::upvalue::UpvalueState;
 use crate::value::Value;
-use crate::vm::{Chunk, OpCode};
+use crate::vm::{CallFrame, Chunk, OpCode};
 use crate::{env::Env, expr::LispExp};
 use std::collections::HashMap as RustHashMap;
 
@@ -145,6 +145,11 @@ impl Heap {
                 LispExp::Box(val) => {
                     self.worklist.push(val);
                 }
+                LispExp::Struct(_, _, values) => {
+                    for val in values {
+                        self.worklist.push(val);
+                    }
+                }
                 _ => {}
             }
         }
@@ -172,6 +177,11 @@ impl Heap {
             LispExp::List(l, _) => {
                 for item in l {
                     self.mark_lisp_exp(item);
+                }
+            }
+            LispExp::Struct(_, _, values) => {
+                for val in values {
+                    self.mark_val(*val);
                 }
             }
             _ => {}
@@ -204,9 +214,11 @@ pub fn collect_garbage(
     env: &Env,
     protected_value: Value,
     vm_stack: &[Value],
+    frames: &[CallFrame],
     debug_gc: bool,
 ) {
     heap.clear_marks();
+    heap.mark_val(protected_value);
 
     let mut curr_env = Some(env.clone());
     while let Some(env_ref) = curr_env {
@@ -221,13 +233,23 @@ pub fn collect_garbage(
     }
 
     // Joga a pilha da VM no carrinho...
-    heap.mark_val(protected_value);
     for value in vm_stack {
         heap.mark_val(*value);
     }
 
-    // O GRANDE MOMENTO: Aciona o motor iterativo para marcar tudo com segurança!
-    heap.process_worklist();
+    for frame in frames {
+        for upvalue in &frame.closure_upvalues {
+            if let UpvalueState::Closed(v) = *upvalue.state.borrow() {
+                heap.mark_val(v);
+            }
+        }
 
+        for consts in &frame.chunk.constants {
+            heap.mark_val(*consts);
+        }
+    }
+
+    // Aciona o motor iterativo para marcar tudo com segurança
+    heap.process_worklist();
     heap.sweep(debug_gc);
 }
