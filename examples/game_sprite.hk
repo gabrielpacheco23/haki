@@ -1,0 +1,49 @@
+;; ==========================================
+;; HAKI LISP GAME ENGINE - TEXTURES
+;; ==========================================
+(require "../libraries/raylib.hk")
+
+(define bg-color (Color 30 30 40 255))
+(define white (Color 255 255 255 255)) ;; O branco mantém as cores originais do PNG
+
+(define KEY-RIGHT 262)
+(define KEY-LEFT 263)
+
+(define (limit value min max)
+  (if (< value min) min
+    (if (> value max) max value)))
+
+(struct Player (x y w h texture speed))
+
+(define (game-loop player)
+  (if (window-should-close)
+      (close-window)
+      (let* ((dir-right (if (is-key-down KEY-RIGHT) player:speed 0))
+             (dir-left (if (is-key-down KEY-LEFT) (- 0 player:speed) 0))
+             
+             (x-raw (+ player:x (+ dir-right dir-left)))
+             (new-x (limit x-raw 0 (- 800 player:w)))
+             
+             (new-player (Player new-x player:y player:w player:h player:texture player:speed)))
+        (begin
+          (begin-drawing)
+          (clear-background bg-color)
+          
+          ; Desenha o PNG
+          (draw-texture new-player:texture new-player:x new-player:y white)
+          
+          (end-drawing)
+          (game-loop new-player)))))
+
+;; ==========================================
+;; INICIALIZAÇÃO E CARREGAMENTO
+;; ==========================================
+(set-target-fps 60)
+(displayln "Iniciando Haki Engine...")
+
+;; A janela tem de estar aberta antes de carregar a TEXTURE (Regra do OpenGL)
+(init-window 800 600 "Haki: Sprite")
+
+(define texture-sonic (load-texture "sonic.jpg"))
+(define sonic (Player 350 250 100 100 texture-sonic 5))
+(game-loop sonic)

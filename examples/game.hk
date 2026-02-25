@@ -1,7 +1,7 @@
 ;; ==========================================
 ;; HAKI LISP GAME ENGINE (RAYLIB)
 ;; ==========================================
-(require "libraries/raylib.hk")
+(require "../libraries/raylib.hk")
 
 (define cor-fundo (Color 30 30 40 255))
 (define cor-vermelha (Color 230 41 55 255))
@@ -23,8 +23,8 @@
 (define (game-loop x-pos)
   (if (window-should-close)
       (close-window)
-      (let* ((dir-direita (if (= (is-key-down KEY-RIGHT) 1) 5 0))
-             (dir-esquerda (if (= (is-key-down KEY-LEFT) 1) -5 0))
+      (let* ((dir-direita (if (is-key-down KEY-RIGHT)  5 0))
+             (dir-esquerda (if (is-key-down KEY-LEFT) -5 0))
              ;; Calcula o movimento
              (x-cru (+ x-pos (+ dir-direita dir-esquerda)))
              

@@ -1,7 +1,7 @@
 ;; ==========================================
 ;; HAKI LISP GAME ENGINE - STRUCTS PURAS
 ;; ==========================================
-(require "libraries/raylib.hk")
+(require "../libraries/raylib.hk")
 
 ;; Criamos as cores usando a nova Struct 'Color'!
 (define cor-fundo (Color 30 30 40 255))
@@ -17,8 +17,8 @@
 (define (game-loop jogador)
   (if (window-should-close)
       (close-window)
-      (let* ((dir-direita (if (= (is-key-down KEY-RIGHT) 1) jogador:velocidade 0))
-             (dir-esquerda (if (= (is-key-down KEY-LEFT) 1) (- 0 jogador:velocidade) 0))
+      (let* ((dir-direita (if (is-key-down KEY-RIGHT) jogador:velocidade 0))
+             (dir-esquerda (if (is-key-down KEY-LEFT) (- 0 jogador:velocidade) 0))
              
              (x-cru (+ jogador:x (+ dir-direita dir-esquerda)))
              (novo-x (limit x-cru 0 (- (get-screen-width) jogador:w)))

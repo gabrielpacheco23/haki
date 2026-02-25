@@ -1387,6 +1387,24 @@ pub fn standard_env(heap: &mut Heap) -> Env {
         });
 
         add_native!(env, heap, "ffi-call", |args, e, h| {
+            fn parse_ffi_type(t_str: &str) -> Type {
+                if t_str.starts_with("struct:") {
+                    // Separa "struct:uint,int" -> ["uint", "int"] e converte recursivamente
+                    let fields: Vec<Type> =
+                        t_str[7..].split(',').map(|s| parse_ffi_type(s)).collect();
+                    Type::structure(fields)
+                } else {
+                    match t_str {
+                        "int" => Type::i32(),
+                        "uint" => Type::u32(),
+                        "float" => Type::f32(),
+                        "bool" => Type::u8(),
+                        "pointer" => Type::pointer(),
+                        _ => Type::void(),
+                    }
+                }
+            }
+
             if args.len() != 4 {
                 return Err(
                     "ffi-call expects 4 args: (ptr ret-type arg-types arg-values)".to_string(),
@@ -1451,11 +1469,47 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let mut cstring_store: Vec<CString> = vec![];
             let mut ptr_store: Vec<Box<*const std::ffi::c_char>> = vec![];
             let mut raw_ptr_store: Vec<Box<usize>> = vec![];
+            let mut struct_16_store: Vec<Box<[u8; 16]>> = vec![];
+            let mut struct_20_store: Vec<Box<[u8; 20]>> = vec![];
 
             let mut ffi_types = vec![];
 
             // 4. Mapear os tipos e fixar os valores no Cofre
             for (t_str, val) in type_strs.iter().zip(arg_vals.iter()) {
+                if t_str.starts_with("struct:") {
+                    let p = if let Some(LispExp::RawPtr(ptr_val)) = h.get(*val) {
+                        *ptr_val
+                    } else {
+                        0
+                    };
+
+                    // Calculamos o tamanho simplificado (4 bytes por campo)
+                    let field_count = t_str[7..].split(',').count();
+                    let size = field_count * 4;
+
+                    // Lemos a memória bruta do ponteiro dinamicamente
+                    unsafe {
+                        match size {
+                            16 => {
+                                let mut buf = Box::new([0u8; 16]);
+                                std::ptr::copy_nonoverlapping(p as *const u8, buf.as_mut_ptr(), 16);
+                                struct_16_store.push(buf);
+                            }
+                            20 => {
+                                // Tamanho exato de uma Texture2D genérica
+                                let mut buf = Box::new([0u8; 20]);
+                                std::ptr::copy_nonoverlapping(p as *const u8, buf.as_mut_ptr(), 20);
+                                struct_20_store.push(buf);
+                            }
+                            _ => {
+                                return Err(format!("Struct size {} not supported yet", size));
+                            }
+                        }
+                    }
+                    ffi_types.push(parse_ffi_type(t_str));
+                    continue;
+                }
+
                 match t_str.as_str() {
                     "int" => {
                         let v = val.as_number() as i32;
@@ -1496,15 +1550,33 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
             }
 
-            // 5. Construir os Argumentos (Agarrando as referências protegidas do Cofre)
+            // Construir os Argumentos (Agarrando as referências protegidas do Cofre)
             let mut ffi_args = vec![];
             let mut i32_idx = 0;
             let mut u32_idx = 0;
             let mut f32_idx = 0;
             let mut ptr_idx = 0;
             let mut raw_idx = 0;
+            let mut s16_idx = 0;
+            let mut s20_idx = 0;
 
             for t_str in &type_strs {
+                if t_str.starts_with("struct:") {
+                    let field_count = t_str[7..].split(',').count();
+                    match field_count * 4 {
+                        16 => {
+                            ffi_args.push(Arg::new(&*struct_16_store[s16_idx]));
+                            s16_idx += 1;
+                        }
+                        20 => {
+                            ffi_args.push(Arg::new(&*struct_20_store[s20_idx]));
+                            s20_idx += 1;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 match t_str.as_str() {
                     "int" => {
                         ffi_args.push(Arg::new(&*i32_store[i32_idx]));
@@ -1530,20 +1602,42 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                 }
             }
 
-            // 6. Configurar o Tipo de Retorno esperado pelo Lisp
-            let ret_type = match ret_type_str.as_str() {
-                "int" => Type::i32(),
-                "float" => Type::f32(),
-                "pointer" => Type::pointer(),
-                "bool" => Type::u8(),
-                _ => Type::void(),
-            };
+            // Configurar o Tipo de Retorno esperado pelo Lisp
+            // let ret_type = match ret_type_str.as_str() {
+            //     "int" => Type::i32(),
+            //     "float" => Type::f32(),
+            //     "pointer" => Type::pointer(),
+            //     "bool" => Type::u8(),
+            //     _ => Type::void(),
+            // };
+            let ret_type = parse_ffi_type(&ret_type_str);
 
-            // 7. Compilar a Assinatura (CIF) e Executar no Processador!
+            // Compilar a Assinatura (CIF) e Executar no Processador
             let cif = Cif::new(ffi_types.into_iter(), ret_type);
             let code_ptr = libffi::middle::CodePtr::from_ptr(func_ptr as *mut _);
 
             unsafe {
+                if ret_type_str.starts_with("struct:") {
+                    let field_count = ret_type_str[7..].split(',').count();
+                    let size = field_count * 4;
+
+                    // O C devolve a Struct Genérica, nós copiamos os bytes para um RawPtr novo
+                    let ptr =
+                        std::alloc::alloc(std::alloc::Layout::from_size_align(size, 4).unwrap());
+
+                    match size {
+                        16 => {
+                            let res: [u8; 16] = cif.call(code_ptr, ffi_args.as_slice());
+                            std::ptr::copy_nonoverlapping(res.as_ptr(), ptr, 16);
+                        }
+                        20 => {
+                            let res: [u8; 20] = cif.call(code_ptr, ffi_args.as_slice());
+                            std::ptr::copy_nonoverlapping(res.as_ptr(), ptr, 20);
+                        }
+                        _ => return Err("Generic struct return failed".to_string()),
+                    }
+                    return Ok(h.alloc(LispExp::RawPtr(ptr as usize)));
+                }
                 match ret_type_str.as_str() {
                     "int" => {
                         let res: i32 = cif.call(code_ptr, ffi_args.as_slice());

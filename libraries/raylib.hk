@@ -50,7 +50,7 @@
             (list x y w h (color->uint cor))))
 
 (define (is-key-down tecla)
-  (ffi-call ptr-is-key-down "bool" '("int") (list tecla)))
+  (if (= (ffi-call ptr-is-key-down "bool" '("int") (list tecla)) 1) #t #f))
 
 (define (end-drawing)
   (ffi-call ptr-end-drawing "void" '() '()))
@@ -64,3 +64,18 @@
 ;; KEYBOARD CONSTANTS
 (define KEY-RIGHT 262)
 (define KEY-LEFT 263)
+
+;; O Lisp avisa o Rust sobre o formato exato da memória!
+(define TEXTURE-TYPE "struct:uint,int,int,int,int")
+
+(define ptr-load-texture (ffi-sym rl "LoadTexture"))
+(define ptr-draw-texture (ffi-sym rl "DrawTexture"))
+
+(define (load-texture filename)
+  ;; Recebemos um RawPtr contendo os 20 bytes devolvidos pelo C!
+  (ffi-call ptr-load-texture TEXTURE-TYPE '("string") (list filename)))
+
+(define (draw-texture textura-ptr x y cor)
+  ;; Passamos o RawPtr e a string mágica. O Rust empacota e envia!
+  (ffi-call ptr-draw-texture "void" (list TEXTURE-TYPE "int" "int" "uint") 
+            (list textura-ptr x y (color->uint cor))))
