@@ -855,7 +855,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
 
         add_native!(env, heap, "gc", |_, env_ref, heap| {
             let before = heap.memory.len() - heap.free_list.len();
-            collect_garbage(heap, env_ref, Value::void(), &[], true);
+            collect_garbage(heap, env_ref, Value::void(), &[], &[], true);
             let after = heap.memory.len() - heap.free_list.len();
             println!("[GC] Cleaned {} object(s).", before - after);
             Ok(Value::void())

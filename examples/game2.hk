@@ -19,11 +19,16 @@
       (close-window)
       (let* ((dir-direita (if (is-key-down KEY-RIGHT) jogador:velocidade 0))
              (dir-esquerda (if (is-key-down KEY-LEFT) (- 0 jogador:velocidade) 0))
+             (dir-baixo (if (is-key-down KEY-DOWN) jogador:velocidade 0))
+             (dir-cima (if (is-key-down KEY-UP) (- 0 jogador:velocidade) 0))
              
              (x-cru (+ jogador:x (+ dir-direita dir-esquerda)))
              (novo-x (limit x-cru 0 (- (get-screen-width) jogador:w)))
+
+             (y-cru (+ jogador:y (+ dir-cima dir-baixo)))
+             (novo-y (limit y-cru 0 (- (get-screen-height) jogador:h)))
              
-             (novo-jogador (Jogador novo-x jogador:y jogador:w jogador:h jogador:cor jogador:velocidade)))
+             (novo-jogador (Jogador novo-x novo-y jogador:w jogador:h jogador:cor jogador:velocidade)))
         (begin
           (begin-drawing)
           

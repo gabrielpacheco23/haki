@@ -1,0 +1,42 @@
+;; ==========================================
+;; TESTE DE STRESS DO GARBAGE COLLECTOR
+;; ==========================================
+
+(displayln "=== INICIANDO TESTE DO GC (STRUCTS) ===")
+
+;; 1. Definimos uma Struct com múltiplos campos (para gastar bastante memória)
+(struct Entidade (id x y hp viva inventario))
+
+;; 2. Criamos uma Entidade Global (O GC NUNCA pode apagar isto, pois está no Env!)
+;; O inventário é uma Lista encadeada (para testar se o GC entra nas listas dentro das structs)
+(define boss-final (Entidade 999 50.5 50.5 10000 #t (list 10 20 30)))
+
+;; 3. Função iterativa que gera LIXO INFINITO
+(define (gera-lixo n)
+  (if (= n 0)
+      (displayln "Fim da geracao de lixo na Heap!")
+      (begin
+        ;; Alocamos uma struct na memória. Como não guardamos numa variável,
+        ;; ela torna-se lixo inatingível imediatamente após ser criada!
+        (Entidade n 10 20 100 #f '())
+        
+        ;; Recursão de Cauda: não gasta Pilha, apenas força o motor da Heap
+        (gera-lixo (- n 1)))))
+
+;; Como o seu limite no Rust é 100.000 (heap.threshold), gerar 500.000 
+;; vai obrigar o Garbage Collector a acordar e varrer a memória umas 5 vezes no mínimo!
+(displayln "Gerando 500.000 Structs descartáveis...")
+(gera-lixo 500000)
+
+(displayln "Varredura concluída. Verificando integridade da memória protegida...")
+
+;; 4. A Prova de Fogo: O Boss sobreviveu? O seu inventário continua intacto?
+(display "HP do Boss Final: ")
+(displayln boss-final:hp)
+
+(display "Primeiro item do inventário do Boss: ")
+(displayln (car boss-final:inventario))
+
+(if (and (= boss-final:hp 10000) (= (car boss-final:inventario) 10))
+    (displayln "\n[SUCESSO] O GC do Haki Lisp é indestrutível! Limpou as structs mortas e salvou as vivas!")
+    (displayln "\n[FALHA] Corrupção de memória detectada!"))

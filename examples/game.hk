@@ -30,7 +30,7 @@
              
              ;; PRENDE NA TELA: A tela tem 800px, o quadrado tem 100px.
              ;; Logo, o X máximo é 700!
-             (novo-x (limit x-cru 0 700)))
+             (novo-x (limit x-cru 0 (- (get-screen-width) 100))))
         (begin
           (begin-drawing)
           (clear-background cor-fundo)

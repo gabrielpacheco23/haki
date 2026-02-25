@@ -71,6 +71,7 @@ pub enum OpCode {
     PokeInt,
     MakeStruct(String, Vec<String>),
     StructGetField(String),
+    StructSetField(String),
 }
 
 #[derive(Clone, Debug)]
@@ -252,7 +253,8 @@ impl Vm {
 
         loop {
             if heap.needs_gc {
-                collect_garbage(heap, &env, Value::void(), &self.stack, false);
+                let top_val = self.stack.last().cloned().unwrap_or(Value::void());
+                collect_garbage(heap, &env, top_val, &self.stack, &self.frames, false);
                 heap.needs_gc = false;
 
                 heap.threshold = (heap.memory.len() - heap.free_list.len()) * 2;
@@ -1033,6 +1035,24 @@ impl Vm {
                         );
                     }
                 }
+                OpCode::StructSetField(field_name) => {
+                    let new_value = self.stack.pop().unwrap_or(Value::void());
+                    let obj_val = self.stack.pop().unwrap_or(Value::void());
+
+                    if let Some(LispExp::Struct(_, names, values)) = heap.get_mut(obj_val) {
+                        if let Some(idx) = names.iter().position(|n| n == field_name) {
+                            values[idx] = new_value;
+                            self.stack.push(Value::void());
+                        } else {
+                            return Err(format!("Field '{}' not found for mutation", field_name));
+                        }
+                    } else {
+                        return Err(
+                            "Attempting to use 'set!' on an object that is not a 'struct'"
+                                .to_string(),
+                        );
+                    }
+                }
             }
         }
     }
@@ -1092,6 +1112,7 @@ impl Display for OpCode {
             OpCode::PokeInt => write!(f, "POKE_INT"),
             OpCode::MakeStruct(name, _) => write!(f, "MAKE_STRUCT {}", name),
             OpCode::StructGetField(field) => write!(f, "STRUCT_GET_FIELD {}", field),
+            OpCode::StructSetField(field) => write!(f, "STRUCT_SET_FIELD {}", field),
         }
     }
 }
@@ -1165,6 +1186,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str, heap: &Heap) {
             OpCode::PokeInt => println!("{}", instruction),
             OpCode::MakeStruct(name, _) => println!("{} {}", instruction, name),
             OpCode::StructGetField(field) => println!("{} {}", instruction, field),
+            OpCode::StructSetField(field) => println!("{} {}", instruction, field),
         }
     }
     println!("======================\n");

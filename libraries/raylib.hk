@@ -26,6 +26,7 @@
 (define ptr-get-screen-height (ffi-sym rl "GetScreenHeight"))
 (define ptr-get-random-value (ffi-sym rl "GetRandomValue"))
 (define ptr-draw-text (ffi-sym rl "DrawText"))
+(define ptr-set-trace-log-level (ffi-sym rl "SetTraceLogLevel"))
 
 (define (init-window w h titulo)
   (ffi-call ptr-init-window "void" '("int" "int" "string") (list w h titulo)))
@@ -69,6 +70,7 @@
 (define KEY-LEFT 263)
 (define KEY-DOWN 264)
 (define KEY-UP 265)
+(define KEY-SPACE 32)
 
 ;; O Lisp avisa o Rust sobre o formato exato da memória!
 (define TEXTURE-TYPE "struct:uint,int,int,int,int")
@@ -106,3 +108,11 @@
 
 (define (play-sound sound)
   (ffi-call ptr-play-sound "void" (list SOUND-TYPE) (list sound)))
+
+; Log Levels
+(define LOG-INFO 3)
+(define LOG-WARNING 4)
+(define LOG-NONE 7)
+
+(define (set-trace-log-level level)
+  (ffi-call ptr-set-trace-log-level "void" '("int") (list level)))

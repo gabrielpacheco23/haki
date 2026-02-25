@@ -5,11 +5,12 @@
 (define snake-color (Color 0 228 48 255))   ; green
 (define apple-color (Color 230 41 55 255))  ; red
 (define dead-color (Color 100 100 100 255)) ; grey
+(define obstacle-color (Color 100 130 100 255)) ; yellow
 (define white (Color 255 255 255 255))
 
 ;; Structs and states
 (struct Pos (x y))
-(struct State (snake dx dy food dead score))
+(struct State (snake dx dy food dead score obstacles))
 
 ;; Util
 (define (remove-last lst)
@@ -17,6 +18,11 @@
     '()
     (cons (car lst) (remove-last (cdr lst)))))
 
+(define (gen-obstacles qtd)
+  (if (= qtd 0)
+    '()
+    (cons (Pos (get-random-value 2 37) (get-random-value 2 27))
+    (gen-obstacles (- qtd 1)))))
 
 (define (pos-equal? p1 p2)
   (if (= p1:x p2:x)
@@ -26,7 +32,6 @@
   (if (null? body)
     #f
     (if (pos-equal? head (car body))
-      ; (if (and (= head:x (car body):x) (= head:y (car body):y))
       #t
       (hit-body? head (cdr body))))) 
 
@@ -40,50 +45,55 @@
 ;; Update logic and input
 (define (process-input state)
   (if state:dead
-    state
-    (let ((dx state:dx)
-          (dy state:dy))
-      (cond
-        ((and (= dx 0) (is-key-down KEY-RIGHT)) (State state:snake 1 0 state:food state:dead state:score))
-        ((and (= dx 0) (is-key-down KEY-LEFT))  (State state:snake -1 0 state:food state:dead state:score))
-      
-        ;; 2. Se está na Horizontal (dy = 0), aceita comandos Verticais
-        ((and (= dy 0) (is-key-down KEY-DOWN))  (State state:snake 0 1 state:food state:dead state:score))
-        ((and (= dy 0) (is-key-down KEY-UP))    (State state:snake 0 -1 state:food state:dead state:score))
-      
-        ;; 3. Fallback: Se nenhuma tecla bater com a regra, mantém o state
-        (else state)))))
+      state
+      (let ((dx state:dx)
+            (dy state:dy))
+        (cond
+          ;; 1. Se está na Vertical (dx = 0), aceita comandos Horizontais
+          ((and (= dx 0) (is-key-down KEY-RIGHT)) 
+           (begin (set! state:dx 1) (set! state:dy 0) state))
+           
+          ((and (= dx 0) (is-key-down KEY-LEFT))  
+           (begin (set! state:dx -1) (set! state:dy 0) state))
+          
+          ;; 2. Se está na Horizontal (dy = 0), aceita comandos Verticais
+          ((and (= dy 0) (is-key-down KEY-DOWN))  
+           (begin (set! state:dx 0) (set! state:dy 1) state))
+           
+          ((and (= dy 0) (is-key-down KEY-UP))    
+           (begin (set! state:dx 0) (set! state:dy -1) state))
+          
+          ;; 3. Fallback: Mantém o state intacto
+          (else state)))))
 
 (define (update-game state)
   (if state:dead
-    (if (is-key-down KEY-ENTER)
-      (restart-game)
-      state)
+    (if (is-key-down KEY-ENTER) (restart-game) state)
       (let* ((head (car state:snake))
              (new-head (Pos (+ head:x state:dx) (+ head:y state:dy))))
         
         (cond
-          ;; Bateu na parede ou no corpo -> Morre
-          ((out-of-screen? new-head)  
-           (State state:snake state:dx state:dy state:food #t state:score))
-          ((hit-body? new-head state:snake)  
-           (State state:snake state:dx state:dy state:food #t state:score))
-          
-          ;; Comeu a maçã -> Cresce, gera new maçã e SOMA 10 score!
-          ((pos-equal? new-head state:food) 
-           (begin
-             (play-sound apple-crunch)
-             (State (cons new-head state:snake)
-                     state:dx state:dy
-                     (Pos (get-random-value 0 39) (get-random-value 0 29))
-                     #f
-                     (+ state:score 1)))) ;; scoring
-          
-          ;; Movimento normal
-          (else
-           (State (cons new-head (remove-last state:snake))
-                   state:dx state:dy state:food #f state:score))))))
+          ((out-of-screen? new-head)
+            (begin (set! state:dead #t) state))  
 
+          ((hit-body? new-head state:snake)
+            (begin (set! state:dead #t) state))
+
+          ((hit-body? new-head state:obstacles)
+            (begin (set! state:dead #t) state))
+
+          ((pos-equal? new-head state:food)
+            (begin
+              (play-sound apple-crunch)
+              (set! state:snake (cons new-head state:snake))
+              (set! state:food (Pos (get-random-value 0 39) (get-random-value 0 29)))
+              (set! state:score (+ state:score 1))
+              state))
+
+          (else
+            (begin
+              (set! state:snake (cons new-head (remove-last state:snake)))state))))))
+       
 ;; Rendering and loop
 (define (draw-snake body color)
   (if (null? body)
@@ -100,8 +110,15 @@
       (let* ((state-with-input (process-input state))
              (new-state (update-game state-with-input)))
         (begin
+
+          ; controle de velocidade
+          (if (is-key-down KEY-SPACE)
+              (set-target-fps 25)   ; velocidade turbo
+              (set-target-fps 10))  ; velocidade normal
+          
           (begin-drawing)
           (clear-background bg-color)
+          (draw-snake new-state:obstacles obstacle-color)
           
           (let ((apple new-state:food))
             (draw-rectangle (* apple:x 20) (* apple:y 20) 20 20 apple-color))
@@ -122,7 +139,6 @@
         
           (end-drawing)
           
-          ;; Recursão de Cauda (TCO Mágico!)
           (game-loop new-state)))))
 
 
@@ -132,11 +148,16 @@
           1 0
           (Pos (get-random-value 5 35) (get-random-value 5 25))
           #f
-          0))
+          0
+          (gen-obstacles 5)))
 
 ;; Game start
+(set-trace-log-level LOG-WARNING)
+
 (set-target-fps 10)
 (displayln "Starting Snake Game in Haki...")
+
+
 (init-window 800 600 "Haki: Snake Game")
 (init-audio-device)
 (define apple-crunch (load-sound "apple_crunch_sound.wav"))

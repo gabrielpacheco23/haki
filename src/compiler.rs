@@ -296,8 +296,33 @@ pub fn compile(
                     if list.len() != 3 {
                         return Err("'set!' requires a variable and value".to_string());
                     }
+
                     match &list[1] {
                         LispExp::Symbol(name, _) => {
+                            if let Some((var_name, field_name)) = name.split_once(':') {
+                                // 1. Compila a variável (para empurrá-la para a pilha)
+                                compile(
+                                    &LispExp::Symbol(var_name.to_string(), current_line),
+                                    chunk,
+                                    false,
+                                    heap,
+                                    state,
+                                    current_line,
+                                )?;
+                                // 2. Compila o novo valor (vai para o topo da pilha)
+                                compile(&list[2], chunk, false, heap, state, current_line)?;
+                                // 3. Emite o OpCode de mutação
+                                chunk.write(
+                                    OpCode::StructSetField(field_name.to_string()),
+                                    current_line,
+                                );
+
+                                if is_tail {
+                                    chunk.write(OpCode::Return, current_line);
+                                }
+                                return Ok(());
+                            }
+
                             compile(&list[2], chunk, false, heap, state, current_line)?;
 
                             let ctx_idx = state.contexts.len() - 1;
