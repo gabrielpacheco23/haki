@@ -1,7 +1,6 @@
 use crate::env::Env;
 use crate::expr::{LispExp, lisp_fmt};
 use crate::heap::Heap;
-use crate::helpers::ast_to_value;
 use crate::value::Value;
 use crate::vm::{Chunk, OpCode};
 use dynasmrt::{DynasmApi, DynasmLabelApi, dynasm};
@@ -14,7 +13,7 @@ extern "C" fn fmod_jit(a: f64, b: f64) -> f64 {
 extern "C" fn jit_vector_ref(vec_val: u64, idx_val: u64, heap_ptr: *mut Heap) -> u64 {
     let vec: Value = unsafe { mem::transmute(vec_val) };
     let idx: Value = unsafe { mem::transmute(idx_val) };
-    let mut heap = unsafe { &mut *heap_ptr };
+    let heap = unsafe { &mut *heap_ptr };
 
     if vec.is_gc_ref() && idx.is_number() {
         let i = idx.as_number() as usize;
@@ -79,11 +78,11 @@ extern "C" fn jit_cdr(pair_val: u64, heap_ptr: *const Heap) -> u64 {
     0xBADBADBADBADBADB
 }
 
+#[allow(unused)]
 extern "C" fn jit_displayln(val: u64, heap_ptr: *const Heap) -> u64 {
     let v: Value = unsafe { mem::transmute(val) };
     let heap = unsafe { &*heap_ptr };
 
-    // Imprime na tela a partir do código de máquina!
     println!("{}", lisp_fmt(v, heap));
     unsafe { mem::transmute(Value::void()) }
 }
@@ -584,7 +583,7 @@ impl CompilerJIT {
                         ; mov rsi, QWORD heap_addr as _
                         ; mov r15, QWORD cdr_ptr as _
 
-                        // === O SEGREDO DO ALINHAMENTO ===
+                        // === ALINHAMENTO ===
                         ; mov r14, rsp
                         ; and rsp, -16
                         ; call r15
@@ -728,7 +727,7 @@ impl CompilerJIT {
         );
     }
 
-    pub fn execute(mut self) -> Result<JitResult, String> {
+    pub fn execute(self) -> Result<JitResult, String> {
         let buffer = self.ops.finalize().unwrap();
 
         let jitted_fn: extern "C" fn() -> u64 =

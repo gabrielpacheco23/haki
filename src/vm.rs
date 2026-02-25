@@ -1,5 +1,4 @@
-use crate::compiler::{CompilerState, CompilerUpvalue, compile};
-use crate::debug;
+use crate::compiler::{CompilerState, CompilerUpvalue};
 use crate::expr::{is_deep_equal, lisp_fmt};
 use crate::heap::collect_garbage;
 use crate::jit::{CompilerJIT, JitResult};

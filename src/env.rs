@@ -1278,7 +1278,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             Ok(ptr_obj)
         });
 
-        add_native!(env, heap, "free", |args, e, h| {
+        add_native!(env, heap, "free", |args, _, h| {
             if args.len() != 1 {
                 return Err("'free' requires 1 argument (raw pointer)".to_string());
             }
@@ -1293,7 +1293,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
         });
 
-        add_native!(env, heap, "char->int", |args, e, h| {
+        add_native!(env, heap, "char->int", |args, _, h| {
             if args.len() != 1 {
                 return Err("char->int expects 1 argument (string)".to_string());
             }
@@ -1307,7 +1307,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
             Err("char->int expects a valid string".to_string())
         });
-        add_native!(env, heap, "int->char", |args, e, h| {
+        add_native!(env, heap, "int->char", |args, _, h| {
             if args.len() != 1 {
                 return Err("int->char expects 1 argument (number)".to_string());
             }
@@ -1386,7 +1386,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             Err("ffi-sym expects a raw ptr (library) and a String (function name)".to_string())
         });
 
-        add_native!(env, heap, "ffi-call", |args, e, h| {
+        add_native!(env, heap, "ffi-call", |args, _, h| {
             fn parse_ffi_type(t_str: &str) -> Type {
                 if t_str.starts_with("struct:") {
                     // Separa "struct:uint,int" -> ["uint", "int"] e converte recursivamente
@@ -1614,13 +1614,6 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
 
             // Configurar o Tipo de Retorno esperado pelo Lisp
-            // let ret_type = match ret_type_str.as_str() {
-            //     "int" => Type::i32(),
-            //     "float" => Type::f32(),
-            //     "pointer" => Type::pointer(),
-            //     "bool" => Type::u8(),
-            //     _ => Type::void(),
-            // };
             let ret_type = parse_ffi_type(&ret_type_str);
 
             // Compilar a Assinatura (CIF) e Executar no Processador
@@ -1683,7 +1676,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             }
         });
 
-        add_native!(env, heap, "struct->c", |args, e, h| {
+        add_native!(env, heap, "struct->c", |args, _, h| {
             if args.len() != 2 {
                 return Err("struct->c expects a struct and a list of types".to_string());
             }
