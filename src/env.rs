@@ -1471,6 +1471,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let mut raw_ptr_store: Vec<Box<usize>> = vec![];
             let mut struct_16_store: Vec<Box<[u8; 16]>> = vec![];
             let mut struct_20_store: Vec<Box<[u8; 20]>> = vec![];
+            let mut struct_40_store: Vec<Box<[u8; 40]>> = vec![];
 
             let mut ffi_types = vec![];
 
@@ -1500,6 +1501,11 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                                 let mut buf = Box::new([0u8; 20]);
                                 std::ptr::copy_nonoverlapping(p as *const u8, buf.as_mut_ptr(), 20);
                                 struct_20_store.push(buf);
+                            }
+                            40 => {
+                                let mut buf = Box::new([0u8; 40]);
+                                std::ptr::copy_nonoverlapping(p as *const u8, buf.as_mut_ptr(), 40);
+                                struct_40_store.push(buf);
                             }
                             _ => {
                                 return Err(format!("Struct size {} not supported yet", size));
@@ -1559,6 +1565,7 @@ pub fn standard_env(heap: &mut Heap) -> Env {
             let mut raw_idx = 0;
             let mut s16_idx = 0;
             let mut s20_idx = 0;
+            let mut s40_idx = 0;
 
             for t_str in &type_strs {
                 if t_str.starts_with("struct:") {
@@ -1571,6 +1578,10 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                         20 => {
                             ffi_args.push(Arg::new(&*struct_20_store[s20_idx]));
                             s20_idx += 1;
+                        }
+                        40 => {
+                            ffi_args.push(Arg::new(&*struct_40_store[s40_idx]));
+                            s40_idx += 1;
                         }
                         _ => {}
                     }
@@ -1633,6 +1644,10 @@ pub fn standard_env(heap: &mut Heap) -> Env {
                         20 => {
                             let res: [u8; 20] = cif.call(code_ptr, ffi_args.as_slice());
                             std::ptr::copy_nonoverlapping(res.as_ptr(), ptr, 20);
+                        }
+                        40 => {
+                            let res: [u8; 40] = cif.call(code_ptr, ffi_args.as_slice());
+                            std::ptr::copy_nonoverlapping(res.as_ptr(), ptr, 40);
                         }
                         _ => return Err("Generic struct return failed".to_string()),
                     }

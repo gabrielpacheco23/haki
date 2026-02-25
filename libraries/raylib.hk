@@ -24,6 +24,8 @@
 (define ptr-set-target-fps (ffi-sym rl "SetTargetFPS"))
 (define ptr-get-screen-width (ffi-sym rl "GetScreenWidth"))
 (define ptr-get-screen-height (ffi-sym rl "GetScreenHeight"))
+(define ptr-get-random-value (ffi-sym rl "GetRandomValue"))
+(define ptr-draw-text (ffi-sym rl "DrawText"))
 
 (define (init-window w h titulo)
   (ffi-call ptr-init-window "void" '("int" "int" "string") (list w h titulo)))
@@ -62,8 +64,11 @@
   (ffi-call ptr-set-target-fps "void" '("int") (list fps)))
 
 ;; KEYBOARD CONSTANTS
+(define KEY-ENTER 257)
 (define KEY-RIGHT 262)
 (define KEY-LEFT 263)
+(define KEY-DOWN 264)
+(define KEY-UP 265)
 
 ;; O Lisp avisa o Rust sobre o formato exato da memória!
 (define TEXTURE-TYPE "struct:uint,int,int,int,int")
@@ -79,3 +84,25 @@
   ;; Passamos o RawPtr e a string mágica. O Rust empacota e envia!
   (ffi-call ptr-draw-texture "void" (list TEXTURE-TYPE "int" "int" "uint") 
             (list textura-ptr x y (color->uint cor))))
+
+(define (get-random-value min max)
+  (ffi-call ptr-get-random-value "int" '("int" "int") (list min max)))
+
+(define (draw-text text x y size color)
+  (ffi-call ptr-draw-text "void" '("string" "int" "int" "int" "uint") (list text x y size (color->uint color))))
+
+
+;; Sound
+(define SOUND-TYPE "struct:int,int,int,int,int,int,int,int,int,int")
+(define ptr-init-audio (ffi-sym rl "InitAudioDevice"))
+(define ptr-load-sound(ffi-sym rl "LoadSound"))
+(define ptr-play-sound (ffi-sym rl "PlaySound"))
+
+(define (init-audio-device)
+  (ffi-call ptr-init-audio "void" '() '()))
+
+(define (load-sound filename)
+  (ffi-call ptr-load-sound SOUND-TYPE '("string") (list filename)))
+
+(define (play-sound sound)
+  (ffi-call ptr-play-sound "void" (list SOUND-TYPE) (list sound)))

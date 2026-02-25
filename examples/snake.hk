@@ -1,0 +1,149 @@
+(require "../libraries/raylib.hk")
+
+;; Colors
+(define bg-color (Color 30 30 40 255))
+(define snake-color (Color 0 228 48 255))   ; green
+(define apple-color (Color 230 41 55 255))  ; red
+(define dead-color (Color 100 100 100 255)) ; grey
+(define white (Color 255 255 255 255))
+
+;; Structs and states
+(struct Pos (x y))
+(struct State (snake dx dy food dead score))
+
+;; Util
+(define (remove-last lst)
+  (if (null? (cdr lst))
+    '()
+    (cons (car lst) (remove-last (cdr lst)))))
+
+
+(define (pos-equal? p1 p2)
+  (if (= p1:x p2:x)
+    (if (= p1:y p2:y) #t #f) #f))
+
+(define (hit-body? head body)
+  (if (null? body)
+    #f
+    (if (pos-equal? head (car body))
+      ; (if (and (= head:x (car body):x) (= head:y (car body):y))
+      #t
+      (hit-body? head (cdr body))))) 
+
+; Verify colision with grid walls (40x30)
+(define (out-of-screen? p)
+  (if (< p:x 0) #t
+  (if (> p:x 39) #t
+  (if (< p:y 0) #t
+  (if (> p:y 29) #t #f)))))
+
+;; Update logic and input
+(define (process-input state)
+  (if state:dead
+    state
+    (let ((dx state:dx)
+          (dy state:dy))
+      (cond
+        ((and (= dx 0) (is-key-down KEY-RIGHT)) (State state:snake 1 0 state:food state:dead state:score))
+        ((and (= dx 0) (is-key-down KEY-LEFT))  (State state:snake -1 0 state:food state:dead state:score))
+      
+        ;; 2. Se está na Horizontal (dy = 0), aceita comandos Verticais
+        ((and (= dy 0) (is-key-down KEY-DOWN))  (State state:snake 0 1 state:food state:dead state:score))
+        ((and (= dy 0) (is-key-down KEY-UP))    (State state:snake 0 -1 state:food state:dead state:score))
+      
+        ;; 3. Fallback: Se nenhuma tecla bater com a regra, mantém o state
+        (else state)))))
+
+(define (update-game state)
+  (if state:dead
+    (if (is-key-down KEY-ENTER)
+      (restart-game)
+      state)
+      (let* ((head (car state:snake))
+             (new-head (Pos (+ head:x state:dx) (+ head:y state:dy))))
+        
+        (cond
+          ;; Bateu na parede ou no corpo -> Morre
+          ((out-of-screen? new-head)  
+           (State state:snake state:dx state:dy state:food #t state:score))
+          ((hit-body? new-head state:snake)  
+           (State state:snake state:dx state:dy state:food #t state:score))
+          
+          ;; Comeu a maçã -> Cresce, gera new maçã e SOMA 10 score!
+          ((pos-equal? new-head state:food) 
+           (begin
+             (play-sound apple-crunch)
+             (State (cons new-head state:snake)
+                     state:dx state:dy
+                     (Pos (get-random-value 0 39) (get-random-value 0 29))
+                     #f
+                     (+ state:score 1)))) ;; scoring
+          
+          ;; Movimento normal
+          (else
+           (State (cons new-head (remove-last state:snake))
+                   state:dx state:dy state:food #f state:score))))))
+
+;; Rendering and loop
+(define (draw-snake body color)
+  (if (null? body)
+    0
+    (let ((piece (car body)))
+      (begin
+        ; multiply by 20 to convert the grid coordinate to pixels
+        (draw-rectangle (* piece:x 20) (* piece:y 20) 20 20 color)
+        (draw-snake (cdr body) color)))))
+
+(define (game-loop state)
+  (if (window-should-close)
+      (close-window)
+      (let* ((state-with-input (process-input state))
+             (new-state (update-game state-with-input)))
+        (begin
+          (begin-drawing)
+          (clear-background bg-color)
+          
+          (let ((apple new-state:food))
+            (draw-rectangle (* apple:x 20) (* apple:y 20) 20 20 apple-color))
+          
+          (if new-state:dead
+              (draw-snake new-state:snake dead-color)
+              (draw-snake new-state:snake snake-color))
+
+          ; draw score
+          (let ((text-score (string-append "SCORE: " (number->string new-state:score))))
+            (draw-text text-score 10 10 20 white))
+
+          (if new-state:dead
+            (begin
+              (draw-text "GAME OVER!" 280 250 40 dead-color)
+              (draw-text "Press ENTER to restart" 280 350 20 white))
+              (display ""))
+        
+          (end-drawing)
+          
+          ;; Recursão de Cauda (TCO Mágico!)
+          (game-loop new-state)))))
+
+
+; Initial state: Snake in the middle (20, 15), going to the right (dx=1, dy=0)
+(define (restart-game)
+  (State (list (Pos 20 15) (Pos 19 15) (Pos 18 15))
+          1 0
+          (Pos (get-random-value 5 35) (get-random-value 5 25))
+          #f
+          0))
+
+;; Game start
+(set-target-fps 10)
+(displayln "Starting Snake Game in Haki...")
+(init-window 800 600 "Haki: Snake Game")
+(init-audio-device)
+(define apple-crunch (load-sound "apple_crunch_sound.wav"))
+
+(game-loop (restart-game))
+
+
+
+
+
