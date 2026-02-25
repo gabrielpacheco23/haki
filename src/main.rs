@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::compiler::{CompilerState, compile, optimize_ast};
 use crate::env::{Env, standard_env};
 use crate::evaluate::eval;
@@ -7,12 +6,12 @@ use crate::heap::{Heap, collect_garbage};
 use crate::helpers::{
     apply_macro, apply_procedure, ast_to_value, expand_macros, expand_quasiquote, value_to_ast,
 };
-use crate::jit::CompilerJIT;
 use crate::parser::{read_from_tokens, tokenize};
 use crate::repl::repl;
 use crate::stdlib::load_stdlib;
 use crate::value::Value;
 use crate::vm::*;
+use std::io::Write;
 
 use std::rc::Rc;
 
@@ -116,18 +115,20 @@ pub fn run_source(
 }
 
 fn main() {
-    let mut heap = Heap::new();
-    let mut global_env = standard_env(&mut heap);
-
-    let macros_src = include_str!("../std/macros.lsp");
-    let lib_src = include_str!("../std/lib.lsp");
-
-    load_stdlib(macros_src, &mut global_env, &mut heap);
-    load_stdlib(lib_src, &mut global_env, &mut heap);
-
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() > 1 {
+    // SCRIPT MODE
+    if args.len() > 1 && args[1] != "--pack" {
+        let mut heap = Heap::new();
+        let mut global_env = standard_env(&mut heap);
+
+        load_stdlib(
+            include_str!("../std/macros.lsp"),
+            &mut global_env,
+            &mut heap,
+        );
+        load_stdlib(include_str!("../std/lib.lsp"), &mut global_env, &mut heap);
+
         let file_path = &args[1];
         match run_script(file_path, &mut global_env, &mut heap) {
             Ok(_) => std::process::exit(0),
@@ -136,69 +137,115 @@ fn main() {
                 std::process::exit(1);
             }
         }
-    } else {
-        repl(global_env, &mut heap)
     }
+
+    // PACKER MODE (--pack)
+    if args.len() > 1 && args[1] == "--pack" {
+        if args.len() < 3 {
+            println!("Uso correto: haki --pack <arquivo.hk>");
+            std::process::exit(1);
+        }
+        pack_executable(&args[2]);
+        std::process::exit(0);
+    }
+
+    // REPL MODE
+    let mut heap = Heap::new();
+    let mut global_env = standard_env(&mut heap);
+    load_stdlib(
+        include_str!("../std/macros.lsp"),
+        &mut global_env,
+        &mut heap,
+    );
+    load_stdlib(include_str!("../std/lib.lsp"), &mut global_env, &mut heap);
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Ok(exe_bytes) = std::fs::read(&exe_path) {
+            let magic = get_magic_signature();
+            if let Some(pos) = exe_bytes.windows(magic.len()).rposition(|w| w == magic) {
+                let payload = &exe_bytes[pos + magic.len()..];
+                let script = String::from_utf8_lossy(payload).to_string();
+
+                let mut compiler_state = CompilerState::new();
+                match run_source(
+                    &script,
+                    &mut global_env,
+                    ExecMode::Normal,
+                    &mut heap,
+                    false,
+                    &mut compiler_state,
+                    false,
+                ) {
+                    Ok(_) => std::process::exit(0),
+                    Err(e) => {
+                        eprintln!("\x1b[1;31mErro fatal no standalone: {}\x1b[0m", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
+    repl(global_env, &mut heap);
 }
 
-// fn main() {
-//     test_jit_loop();
-// }
+fn pack_executable(target_file: &str) {
+    let exe_path = std::env::current_exe().expect("Failed to obtain the current executable");
+    let exe_bytes = std::fs::read(&exe_path).expect("Failed to read its own executable");
 
-use std::time::Instant;
+    let mut final_script = String::new();
+    let content = std::fs::read_to_string(target_file).expect("Failed to read the script");
 
-// fn test_jit_loop() {
-//     let mut chunk = crate::vm::Chunk::new();
+    for line in content.lines() {
+        if line.starts_with("(require ") {
+            if let (Some(start), Some(end)) = (line.find('"'), line.rfind('"')) {
+                if start != end {
+                    let req_path = &line[start + 1..end];
+                    let req_content = std::fs::read_to_string(req_path).unwrap_or_else(|_| {
+                        panic!("Failed to read the required library: {}", req_path)
+                    });
+                    final_script.push_str(&req_content);
+                    final_script.push('\n');
+                    continue;
+                }
+            }
+        }
+        final_script.push_str(line);
+        final_script.push('\n');
+    }
 
-//     let idx_10m = chunk.add_constant(crate::value::Value::number(10_000_000.0));
-//     let idx_0 = chunk.add_constant(crate::value::Value::number(0.0));
-//     let idx_1 = chunk.add_constant(crate::value::Value::number(1.0));
+    let out_name = if cfg!(target_os = "windows") {
+        "app.exe"
+    } else {
+        "app"
+    };
+    let mut out_file =
+        std::fs::File::create(out_name).expect("Failed to create the final executable");
 
-//     // [IP 00] i = 10.000.000
-//     chunk.write(crate::vm::OpCode::Constant(idx_10m), 1);
-//     // [IP 01]
-//     chunk.write(crate::vm::OpCode::SetLocal(0), 1);
+    let magic = get_magic_signature();
 
-//     // --- INÍCIO DO LOOP ---
-//     // [IP 02]
-//     chunk.write(crate::vm::OpCode::Constant(idx_0), 1);
-//     // [IP 03]
-//     chunk.write(crate::vm::OpCode::GetLocal(0), 1);
-//     // [IP 04] 0 < i ?
-//     chunk.write(crate::vm::OpCode::Lt(2), 1);
+    out_file.write_all(&exe_bytes).unwrap();
+    out_file.write_all(&magic).unwrap();
+    out_file.write_all(final_script.as_bytes()).unwrap();
 
-//     // [IP 05] SE FALSO, PULA PARA O FIM (IP 11)!!!
-//     chunk.write(crate::vm::OpCode::JumpIfFalse(11), 1);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = out_file.metadata().unwrap().permissions();
+        perms.set_mode(0o755); // Rwxr-xr-x
+        out_file.set_permissions(perms).unwrap();
+    }
 
-//     // [IP 06]
-//     chunk.write(crate::vm::OpCode::GetLocal(0), 1);
-//     // [IP 07]
-//     chunk.write(crate::vm::OpCode::Constant(idx_1), 1);
-//     // [IP 08] i - 1
-//     chunk.write(crate::vm::OpCode::Sub, 1);
-//     // [IP 09] Salva no Local 0
-//     chunk.write(crate::vm::OpCode::SetLocal(0), 1);
+    println!(
+        "The app was packaged into a single standalone file: {}",
+        out_name
+    );
+}
 
-//     // [IP 10] Pula de volta para o INÍCIO DO LOOP (IP 02)
-//     chunk.write(crate::vm::OpCode::Jump(2), 1);
-
-//     // --- FINAL DO PROGRAMA [IP 11] ---
-//     chunk.write(crate::vm::OpCode::GetLocal(0), 1);
-//     // [IP 12]
-//     chunk.write(crate::vm::OpCode::Return, 1);
-
-//     let mut jit = crate::jit::CompilerJIT::new();
-//     println!("Compilando JIT...");
-//     jit.compile(&chunk);
-
-//     println!("Iniciando JIT (10 Milhões de iterações)...");
-//     let start = Instant::now();
-//     let result = jit.execute().unwrap();
-//     let duration = start.elapsed();
-
-//     println!(
-//         "JIT retornou: {} (Tempo: {:?})",
-//         result.as_number(),
-//         duration
-//     );
-// }
+fn get_magic_signature() -> Vec<u8> {
+    let mut magic = Vec::new();
+    magic.extend_from_slice(b"[[[HAKI_");
+    magic.extend_from_slice(b"PAYLOAD_");
+    magic.extend_from_slice(b"START]]]");
+    magic
+}
