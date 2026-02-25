@@ -6,17 +6,23 @@
 (define apple-color (Color 230 41 55 255))  ; red
 (define dead-color (Color 100 100 100 255)) ; grey
 (define obstacle-color (Color 100 130 100 255)) ; yellow
+(define golden-color (Color 255 215 0 255))
 (define white (Color 255 255 255 255))
 
 ;; Structs and states
 (struct Pos (x y))
-(struct State (snake dx dy food dead score obstacles))
+(struct State (snake dx dy food dead score obstacles golden-apple golden-timer))
 
 ;; Util
 (define (remove-last lst)
   (if (null? (cdr lst))
     '()
     (cons (car lst) (remove-last (cdr lst)))))
+
+(define (is-golden-apple? head golden)
+  (if (eq? golden #f)
+    #f
+    (pos-equal? head golden)))
 
 (define (gen-obstacles qtd)
   (if (= qtd 0)
@@ -68,31 +74,115 @@
 
 (define (update-game state)
   (if state:dead
-    (if (is-key-down KEY-ENTER) (restart-game) state)
+      (if (is-key-down KEY-ENTER) (restart-game) state)
+      
       (let* ((head (car state:snake))
              (new-head (Pos (+ head:x state:dx) (+ head:y state:dy))))
         
-        (cond
-          ((out-of-screen? new-head)
-            (begin (set! state:dead #t) state))  
+        (begin
+          ;; ==========================================
+          ;; 1. LÓGICA DO TEMPO (TIMER DA MAÇÃ DOURADA)
+          ;; ==========================================
+          (if (> state:golden-timer 0)
+              (begin
+                (set! state:golden-timer (- state:golden-timer 1))
+                ;; Se o tempo acabar, a maçã desaparece!
+                (if (= state:golden-timer 0)
+                    (set! state:golden-apple #f)
+                    #f))
+              #f)
 
-          ((hit-body? new-head state:snake)
-            (begin (set! state:dead #t) state))
+          (cond
+            ;; 2. Colisões Fatais (Paredes, Corpo, Pedras)
+            ((out-of-screen? new-head)        (begin (set! state:dead #t) state))
+            ((hit-body? new-head state:snake) (begin (set! state:dead #t) state))
+            ((hit-body? new-head state:obstacles) (begin (set! state:dead #t) state))
+            
+            ;; 3. Comeu a MAÇÃ DOURADA? (50 Pontos!)
+            ((is-golden-apple? new-head state:golden-apple)
+             (begin
+               (play-sound apple-crunch)
+               (set! state:snake (cons new-head state:snake))
+               (set! state:score (+ state:score 50))
+               (set! state:golden-apple #f) ;; Some do mapa
+               (set! state:golden-timer 0)
+               state))
 
-          ((hit-body? new-head state:obstacles)
-            (begin (set! state:dead #t) state))
+            ;; 4. Comeu a Maçã Normal? (10 Pontos + Chance de Dourada)
+            ((pos-equal? new-head state:food) 
+             (begin
+               (play-sound apple-crunch)
+               (set! state:snake (cons new-head state:snake))
+               (set! state:food (Pos (get-random-value 0 39) (get-random-value 0 29)))
+               (set! state:score (+ state:score 10))
+               
+               ;; ROLA OS DADOS: 10% de chance de spawnar a Dourada se não houver nenhuma!
+               (if (and (eq? state:golden-apple #f) (= (get-random-value 1 10) 1))
+                   (begin
+                     (set! state:golden-apple (Pos (get-random-value 2 37) (get-random-value 2 27)))
+                     (set! state:golden-timer 50)) ;; Dá 5 segundos (a 10 FPS) para o jogador!
+                   #f)
+               state))
+            
+            ;; 5. Movimento normal
+            (else
+             (begin
+               (set! state:snake (cons new-head (remove-last state:snake)))
+               state)))))))
 
-          ((pos-equal? new-head state:food)
-            (begin
-              (play-sound apple-crunch)
-              (set! state:snake (cons new-head state:snake))
-              (set! state:food (Pos (get-random-value 0 39) (get-random-value 0 29)))
-              (set! state:score (+ state:score 1))
-              state))
+; (define (update-game state)
+;   (if state:dead
+;     (if (is-key-down KEY-ENTER) (restart-game) state)
+;       (let* ((head (car state:snake))
+;              (new-head (Pos (+ head:x state:dx) (+ head:y state:dy))))
+        
+;         (begin
+;           (if (> state:golden-timer 0)
+;               (begin
+;                 (set! state:golden-timer (- state:golden-timer 1))
+;                 (if (= state:golden-timer 0)
+;                     (set! state:golden-apple #f)
+;                     #f))
+;               #f)
+        
+;         (cond
+;           ((out-of-screen? new-head)
+;             (begin (set! state:dead #t) state))  
 
-          (else
-            (begin
-              (set! state:snake (cons new-head (remove-last state:snake)))state))))))
+;           ((hit-body? new-head state:snake)
+;             (begin (set! state:dead #t) state))
+
+;           ((hit-body? new-head state:obstacles)
+;             (begin (set! state:dead #t) state))
+
+;           ((is-golden-apple? new-head state:golden-apple)
+;             (begin
+;               (play-sound apple-crunch)
+;               (set! state:snake (cons new-head state:snake))
+;               (set! state:score (+ state:score 50))
+;               (set! state:golden-apple #f)
+;               (set! state:golden-timer 0)
+;               state))
+
+;           ((pos-equal? new-head state:food)
+;             (begin
+;               (play-sound apple-crunch)
+;               (set! state:snake (cons new-head state:snake))
+;               (set! state:food (Pos (get-random-value 0 39) (get-random-value 0 29)))
+;               (set! state:score (+ state:score 1))
+;               ; state))
+
+;               ; rola os dados: 10% de chance de spawnar golden
+;               (if (and (eq? state:golden-apple #f) (= (get-random-value 1 10) 1))
+;                   (begin
+;                     (set! state:golden-appl (Pos (get-random-value 2 37) (get-random-value 2 27)))
+;                     (set! state:golden-timer 50)) ; 5 secs (10 fps)
+;                   #f)
+;              state))
+
+;           (else
+;             (begin
+;               (set! state:snake (cons new-head (remove-last state:snake)))state)))))))
        
 ;; Rendering and loop
 (define (draw-snake body color)
@@ -122,6 +212,10 @@
           
           (let ((apple new-state:food))
             (draw-rectangle (* apple:x 20) (* apple:y 20) 20 20 apple-color))
+
+          (if (eq? new-state:golden-apple #f)
+              #f
+              (draw-snake (list new-state:golden-apple) golden-color))
           
           (if new-state:dead
               (draw-snake new-state:snake dead-color)
@@ -149,7 +243,9 @@
           (Pos (get-random-value 5 35) (get-random-value 5 25))
           #f
           0
-          (gen-obstacles 5)))
+          (gen-obstacles 5)
+          #f
+          0))
 
 ;; Game start
 (set-trace-log-level LOG-WARNING)

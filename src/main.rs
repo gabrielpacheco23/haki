@@ -142,10 +142,17 @@ fn main() {
     // PACKER MODE (--pack)
     if args.len() > 1 && args[1] == "--pack" {
         if args.len() < 3 {
-            println!("Uso correto: haki --pack <arquivo.hk>");
+            println!("Usage: haki --pack <source.hk> [output_name]");
             std::process::exit(1);
         }
-        pack_executable(&args[2]);
+
+        let out_name = if args.len() > 3 {
+            args[3].clone()
+        } else {
+            "app".to_string()
+        };
+
+        pack_executable(&args[2], &out_name);
         std::process::exit(0);
     }
 
@@ -189,7 +196,7 @@ fn main() {
     repl(global_env, &mut heap);
 }
 
-fn pack_executable(target_file: &str) {
+fn pack_executable(target_file: &str, custom_out_name: &str) {
     let exe_path = std::env::current_exe().expect("Failed to obtain the current executable");
     let exe_bytes = std::fs::read(&exe_path).expect("Failed to read its own executable");
 
@@ -214,13 +221,18 @@ fn pack_executable(target_file: &str) {
         final_script.push('\n');
     }
 
-    let out_name = if cfg!(target_os = "windows") {
-        "app.exe"
-    } else {
-        "app"
-    };
+    let mut final_out_name = custom_out_name.to_string();
+    if cfg!(target_os = "windows") && !final_out_name.ends_with(".exe") {
+        final_out_name.push_str(".exe");
+    }
+
+    // let out_name = if cfg!(target_os = "windows") {
+    //     "app.exe"
+    // } else {
+    //     "app"
+    // };
     let mut out_file =
-        std::fs::File::create(out_name).expect("Failed to create the final executable");
+        std::fs::File::create(&final_out_name).expect("Failed to create the final executable");
 
     let magic = get_magic_signature();
 
@@ -238,7 +250,7 @@ fn pack_executable(target_file: &str) {
 
     println!(
         "The app was packaged into a single standalone file: {}",
-        out_name
+        final_out_name
     );
 }
 
