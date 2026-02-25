@@ -127,6 +127,24 @@ Haki provides native TCP sockets, allowing you to spin up web servers directly f
         "<h1>Hello from Haki Lisp!</h1>"))))
 ```
 
+## 📦 Executable Packing (Standalone)
+
+Haki Lisp is not just a scripting language; it contains a built-in compiler and packager! You can transform your Lisp scripts (even those using native FFI, like Raylib) into a **single, standalone executable**.
+
+This means you can distribute your game or software to anyone, and they won't need to install Haki, Rust, or configure environment variables. Everything runs with a single click!
+
+### How to use:
+```bash
+# Syntax:
+haki --pack <main.hk> [exe_name]
+
+# Example - Generates "my_game.exe" (Windows) or "my_game" (Linux/Mac)
+haki --pack game.hk my_game
+
+# Example (default name) - Generates "app"
+haki --pack script.hk
+```
+
 ## 🧠 Architecture
 
 Even as a toy project, Haki implements a full-fledged compilation pipeline rather than a simple tree-walking interpreter:
